@@ -1,6 +1,5 @@
-backed-up-at*
-icann*.pem
-icann.pem
+*.pem
+*.backup_*
 ksk-as-*.txt
 root.zone
 root-anchors.*
