@@ -6,3 +6,6 @@ root.zone
 root-anchors.*
 venv2
 venv3
+*.egg-info
+build
+dist
