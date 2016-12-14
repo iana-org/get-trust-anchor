@@ -1,0 +1,8 @@
+language: python
+matrix:
+  include:
+  - python: "2.7"
+    script: make regress2_offline
+  - python: "3.5"
+    install: make pip3
+    script: make regress3_offline
