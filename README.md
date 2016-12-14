@@ -1,5 +1,7 @@
 # DNSSEC Trust Anchor Fetcher
 
+[![Build Status](https://api.travis-ci.org/kirei/get_trust_anchor.png)](https://travis-ci.org/kirei/get_trust_anchor)
+
 This tool writes out a copy of the current DNSSEC trust anchor.
 
 ## Usage
