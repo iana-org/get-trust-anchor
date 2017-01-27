@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 #
+# DNSSEC Trust Anchor Fetcher
+# https://github.com/kirei/get_trust_anchor
+#
 # Copyright (c) 2016, Paul Hoffman. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
