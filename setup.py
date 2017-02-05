@@ -11,7 +11,7 @@ setup(
         'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3'
     ],
-    url='https://github.com/kirei/get_trust_anchor/',
+    url='https://github.com/iana-org/get_trust_anchor/',
     scripts=[
         'get_trust_anchor.py'
     ]
