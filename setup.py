@@ -12,7 +12,10 @@ setup(
         'Programming Language :: Python :: 3'
     ],
     url='https://github.com/iana-org/get_trust_anchor/',
-    scripts=[
-        'get_trust_anchor.py'
-    ]
+    packages=['get_trust_anchor'],
+    entry_points={
+        'console_scripts': [
+            'get-trust-anchor = get_trust_anchor.__main__:main'
+        ]
+    }
 )

@@ -474,4 +474,4 @@ def main():
                     print("Could not delete {}: '{}'. Continuing".format(this_file, this_exception))
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
