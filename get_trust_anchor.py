@@ -173,7 +173,7 @@ def extract_ksks_from_anchors(trust_anchors):
     ksks = []
     for (i, anchor) in enumerate(trust_anchors):
         if not "PublicKey" in anchor or not "Flags" in anchor:
-            print("Trust anchor {} does not include both PublicKey and Flags values.", )
+            print("Trust anchor {} does not include both PublicKey and Flags values.".format(i))
             continue
         ksks.append({'f': anchor["Flags"], 'p': 3, 'a': anchor["Algorithm"], 'k': anchor["PublicKey"]})
     return ksks
