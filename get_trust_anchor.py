@@ -167,11 +167,11 @@ def dnskey_to_hex_of_hash(dnskey_dict, hash_type):
     return (this_hash.hexdigest()).upper()
 
 
-def extract_ksks_from_trust_anchors(trust_anchors):
+def extract_ksks_from_trust_anchors(valid_trust_anchors):
     """Extract and return the KSKs from the parsed trust anchors."""
     print("Extracting KSKs from trust anchor...")
     ksks = []
-    for (i, anchor) in enumerate(trust_anchors):
+    for (i, anchor) in enumerate(valid_trust_anchors):
         if not "PublicKey" in anchor or not "Flags" in anchor:
             print("Trust anchor {} does not include both PublicKey and Flags values.".format(i))
             continue
@@ -473,7 +473,7 @@ def main():
     ### Step 6. Verify that the trust anchors match the published KSKs
     ### file.
     if opts.ksks_from_trust_anchor:
-        ksk_records = extract_ksks_from_trust_anchors(trust_anchors)
+        ksk_records = extract_ksks_from_trust_anchors(valid_trust_anchors)
     else:
         ksk_records = fetch_ksk()
     for key in ksk_records:
