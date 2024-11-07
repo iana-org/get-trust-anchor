@@ -167,9 +167,9 @@ def dnskey_to_hex_of_hash(dnskey_dict, hash_type):
     return (this_hash.hexdigest()).upper()
 
 
-def extract_ksks_from_anchors(trust_anchors):
-    """Extract and return the KSKs from the parsed trust anchors data."""
-    print("Extracting KSKs from trust anchors data...")
+def extract_ksks_from_trust_anchors(trust_anchors):
+    """Extract and return the KSKs from the parsed trust anchors."""
+    print("Extracting KSKs from trust anchor...")
     ksks = []
     for (i, anchor) in enumerate(trust_anchors):
         if not "PublicKey" in anchor or not "Flags" in anchor:
@@ -415,8 +415,8 @@ def main():
     cmd_parse = argparse.ArgumentParser(description="DNSSEC Trust Anchor Tool")
     cmd_parse.add_argument("--local", dest="local", type=str,\
         help="Name of local file to use instead of getting the trust anchor from the URL")
-    cmd_parse.add_argument("--ksks_from_anchors_file", dest="ksks_from_anchors_file", action='store_true',\
-        help="Use the KSKs from the trust anchors file instead of from DNS.")
+    cmd_parse.add_argument("--ksks_from_trust_anchor", dest="ksks_from_trust_anchor", action='store_true',\
+        help="Use the KSKs from the trust anchor instead of from DNS.")
     cmd_parse.add_argument("--keep", dest="keep", action='store_true',\
         help="Keep the temporary files (the XML and validating signature")
     opts = cmd_parse.parse_args()
@@ -472,8 +472,8 @@ def main():
 
     ### Step 6. Verify that the trust anchors match the published KSKs
     ### file.
-    if opts.ksks_from_anchors_file:
-        ksk_records = extract_ksks_from_anchors(trust_anchors)
+    if opts.ksks_from_trust_anchor:
+        ksk_records = extract_ksks_from_trust_anchors(trust_anchors)
     else:
         ksk_records = fetch_ksk()
     for key in ksk_records:
