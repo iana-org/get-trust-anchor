@@ -415,7 +415,7 @@ def main():
     cmd_parse = argparse.ArgumentParser(description="DNSSEC Trust Anchor Tool")
     cmd_parse.add_argument("--local", dest="local", type=str,\
         help="Name of local file to use instead of getting the trust anchor from the URL")
-    cmd_parse.add_argument("--ksks_from_trust_anchor", dest="ksks_from_trust_anchor", action='store_true',\
+    cmd_parse.add_argument("--ksks-from-trust-anchor", dest="ksks_from_trust_anchor", action='store_true',\
         help="Use the KSKs from the trust anchor instead of from DNS.")
     cmd_parse.add_argument("--keep", dest="keep", action='store_true',\
         help="Keep the temporary files (the XML and validating signature")
