@@ -280,11 +280,10 @@ def extract_trust_anchors_from_xml(trust_anchor_xml):
             digest_value_dict[this_subelement] = this_key_tag_text
         # Optional values
         for this_subelement in ["PublicKey", "Flags"]:
-            try:
-                this_key_tag_text = (this_digest_element.find(this_subelement)).text
-            except:
+            value = this_digest_element.find(this_subelement)
+            if value is None:
                 continue
-            digest_value_dict[this_subelement] = this_key_tag_text
+            digest_value_dict[this_subelement] = value.text
         for this_attribute in ["validFrom", "validUntil"]:
             if this_attribute in this_digest_element.keys():
                 digest_value_dict[this_attribute] = this_digest_element.attrib[this_attribute]
