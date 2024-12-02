@@ -167,6 +167,18 @@ def dnskey_to_hex_of_hash(dnskey_dict, hash_type):
     return (this_hash.hexdigest()).upper()
 
 
+def extract_ksks_from_trust_anchors(valid_trust_anchors):
+    """Extract and return the KSKs from the parsed trust anchors."""
+    print("Extracting KSKs from trust anchor...")
+    ksks = []
+    for (i, anchor) in enumerate(valid_trust_anchors):
+        if "PublicKey" not in anchor or "Flags" not in anchor:
+            print("Trust anchor {} does not include both PublicKey and Flags values.".format(i))
+            continue
+        ksks.append({'f': anchor["Flags"], 'p': 3, 'a': anchor["Algorithm"], 'k': anchor["PublicKey"]})
+    return ksks
+
+
 def fetch_ksk():
     """Return the KSKs, or die if they can't be found in via Google nor the zone file"""
     print("Fetching via Google Public DNS...")
@@ -266,6 +278,12 @@ def extract_trust_anchors_from_xml(trust_anchor_xml):
                 die("Did not find {} element in a KeyDigest in a trust anchor.".format(\
                     this_subelement))
             digest_value_dict[this_subelement] = this_key_tag_text
+        # Optional values
+        for this_subelement in ["PublicKey", "Flags"]:
+            value = this_digest_element.find(this_subelement)
+            if value is None:
+                continue
+            digest_value_dict[this_subelement] = value.text
         for this_attribute in ["validFrom", "validUntil"]:
             if this_attribute in this_digest_element.keys():
                 digest_value_dict[this_attribute] = this_digest_element.attrib[this_attribute]
@@ -396,6 +414,8 @@ def main():
     cmd_parse = argparse.ArgumentParser(description="DNSSEC Trust Anchor Tool")
     cmd_parse.add_argument("--local", dest="local", type=str,\
         help="Name of local file to use instead of getting the trust anchor from the URL")
+    cmd_parse.add_argument("--ksks-from-trust-anchor", dest="ksks_from_trust_anchor", action='store_true',\
+        help="Use the KSKs from the trust anchor instead of from DNS.")
     cmd_parse.add_argument("--keep", dest="keep", action='store_true',\
         help="Keep the temporary files (the XML and validating signature")
     opts = cmd_parse.parse_args()
@@ -451,7 +471,10 @@ def main():
 
     ### Step 6. Verify that the trust anchors match the published KSKs
     ### file.
-    ksk_records = fetch_ksk()
+    if opts.ksks_from_trust_anchor:
+        ksk_records = extract_ksks_from_trust_anchors(valid_trust_anchors)
+    else:
+        ksk_records = fetch_ksk()
     for key in ksk_records:
         print("Found KSK {flags} {proto} {alg} '{keystart}...{keyend}'.".format(\
             flags=key['f'], proto=key['p'], alg=key['a'],
