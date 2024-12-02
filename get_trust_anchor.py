@@ -354,7 +354,7 @@ def export_ksk(valid_ksks, ds_record_filename, dnskey_record_filename):
     ##############################
 
     dnskey_record_contents = ""
-    ds_record_contents= ""
+    ds_record_contents = ""
 
     for this_matched_ksk in valid_ksks:
         # Write out the DNSKEY
