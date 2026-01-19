@@ -412,15 +412,19 @@ def main():
 
     # Where the files we create are kept
     (_, trust_anchor_filename) = tempfile.mkstemp(prefix="trust_anchor_")
-    (_, signature_filename) = tempfile.mkstemp(prefix="signature_")
-    (_, icann_ca_filename) = tempfile.mkstemp(prefix="icann_ca_")
-    temp_files = [trust_anchor_filename, signature_filename, icann_ca_filename]
+    temp_files = [trust_anchor_filename]
     dnskey_record_filename = "ksk-as-dnskey.txt"
     ds_record_filename = "ksk-as-ds.txt"
 
     cmd_parse = argparse.ArgumentParser(description="DNSSEC Trust Anchor Tool")
     cmd_parse.add_argument("--local", dest="local", type=str,\
         help="Name of local file to use instead of getting the trust anchor from the URL")
+    cmd_parse.add_argument("--local-sig", dest="local_sig", type=str,\
+        help="Name of local file to use instead of getting the trust anchor signature from the URL")
+    cmd_parse.add_argument("--root-ca", dest="root_ca", type=str,\
+        help="Name of local root anchor CA file instead of using built-in ICANN_ROOT_CA_CERT")
+    cmd_parse.add_argument("--no-validation", dest="no_validation", action='store_true',\
+        help="Disable validation for remote or local files")
     cmd_parse.add_argument("--ksks-from-trust-anchor", dest="ksks_from_trust_anchor", action='store_true',\
         help="Use the KSKs from the trust anchor instead of from DNS.")
     cmd_parse.add_argument("--keep", dest="keep", action='store_true',\
@@ -453,22 +457,40 @@ def main():
 
     ### Step 2. Fetch the S/MIME signature for the trust anchor file from
     ### IANA using HTTPS. Get the signature file from its URL, write it to disk.
-    try:
-        signature_url = urlopen(URL_ROOT_ANCHORS_SIGNATURE)
-    except Exception as this_exception:
-        die("Was not able to open URL {}. returned text was '{}'.".format(\
-            URL_ROOT_ANCHORS_SIGNATURE, this_exception))
-    signature_contents = signature_url.read()
-    signature_url.close()
-    write_out_file(signature_filename, signature_contents)
+    if opts.local_sig:
+        if not os.path.exists(opts.local):
+            die("Could not find file {}.".format(opts.local_sig))
+        try:
+            signature_filename = opts.local_sig
+            signature_contents = open(opts.local_sig, mode="rb").read()
+        except:
+            die("Could not read from file {}.".format(opts.local_sig))
+    else:
+        try:
+            (_, signature_filename) = tempfile.mkstemp(prefix="signature_")
+            temp_files.append(signature_filename)
+
+            signature_url = urlopen(URL_ROOT_ANCHORS_SIGNATURE)
+            signature_contents = signature_url.read()
+            signature_url.close()
+            write_out_file(signature_filename, signature_contents)
+        except Exception as this_exception:
+            die("Was not able to open URL {}. returned text was '{}'.".format(\
+                URL_ROOT_ANCHORS_SIGNATURE, this_exception))
 
     ### Step 3. Validate the signature on the trust anchor file using a
     ### built-in IANA CA key. Skip this step if using a local file.
-    if opts.local:
-        print("Not validating the local trust anchor file.")
+    if opts.root_ca:
+        icann_ca_filename = opts.root_ca
     else:
+        (_, icann_ca_filename) = tempfile.mkstemp(prefix="icann_ca_")
+        temp_files.append(icann_ca_filename)
         write_out_file(icann_ca_filename, ICANN_ROOT_CA_CERT)
+
+    if opts.no_validation is not True:
         validate_detached_signature(trust_anchor_filename, signature_filename, icann_ca_filename)
+    else:
+        print("Not validating the local trust anchor file.")
 
     ### Step 4. Extract the trust anchor key digests from the trust anchor file
     trust_anchors = extract_trust_anchors_from_xml(trust_anchor_xml)
