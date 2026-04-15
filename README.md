@@ -1,15 +1,77 @@
-# DNSSEC Trust Anchor Fetcher
+# DNSSEC Trust Anchor Tool
 
-This tool writes out a copy of the current DNSSEC trust anchor. It is compatible with both Python 2.7 and Python 3.x, and has no dependencies except [Python](https://www.python.org/) and the [OpenSSL](https://www.openssl.org/) command line tool.
+This tool fetches the current DNSSEC root trust anchor from
+[IANA](https://www.iana.org/dnssec), cryptographically validates it,
+and writes out the root KSK (Key Signing Key) as DNSKEY and DS
+records.
 
-The DNSSEC trust anchor will be fetch from [IANA](https://www.iana.org/dnssec), and the root KSK (Key Signing Key) will be fetched using [Google Public DNS](https://developers.google.com/speed/public-dns/) over HTTPS, by downloading the [root zone file](https://www.internic.net/domain/root.zone), or optionally directly from the DNSSEC trust anchor.
+It requires [Python](https://www.python.org/) 3.8+ and the
+[OpenSSL](https://www.openssl.org/) command line tool. There are no
+other dependencies.
 
+## How it works
+
+1. Fetches the trust anchor XML from IANA over HTTPS
+2. Fetches the corresponding S/MIME signature from IANA
+3. Validates the signature using a built-in ICANN Root CA certificate
+4. Extracts the trust anchor key digests from the XML
+5. Checks the validity period for each digest
+6. Fetches the current root KSK via [Google Public DNS](https://developers.google.com/speed/public-dns/)
+   over HTTPS (falling back to the [root zone file](https://www.internic.net/domain/root.zone))
+7. Matches the KSKs against the trust anchors and writes them out
+
+The signature validation uses a CA certificate embedded in the tool
+itself, so the trust anchors are cryptographically verified regardless
+of whether HTTPS certificate checking succeeds.
+
+## Installation
+
+Install from the repository:
+
+    pip install .
+
+This provides a `get-trust-anchor` command.
 
 ## Usage
 
-    python get_trust_anchor.py
+Run the installed command:
 
-## Root zone Trust Anchors
+    get-trust-anchor
+
+Or invoke as a Python module:
+
+    python -m get_trust_anchor
+
+### Options
+
+| Option | Description |
+|---|---|
+| `--local FILE` | Use a local trust anchor XML file instead of fetching from IANA |
+| `--local-sig FILE` | Use a local signature file instead of fetching from IANA |
+| `--root-ca FILE` | Use a custom root CA certificate instead of the built-in one |
+| `--no-validation` | Skip signature validation |
+| `--ksks-from-trust-anchor` | Extract KSKs directly from the trust anchor XML instead of fetching from DNS |
+| `--keep` | Keep temporary files (XML and signature) after running |
+
+### Output
+
+The tool writes two files to the current directory:
+
+- `ksk-as-dnskey.txt` -- root KSKs as DNSKEY records
+- `ksk-as-ds.txt` -- root KSKs as DS records
+
+## Development
+
+Run the tests:
+
+    pip install -e ".[test]"
+    pytest
+
+## Root zone trust anchors
 
 - https://www.iana.org/dnssec
 - https://data.iana.org/root-anchors/root-anchors.xml
+
+## License
+
+BSD 2-Clause. See [LICENSE](LICENSE) for details.
