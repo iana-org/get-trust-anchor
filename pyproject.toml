@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "get-trust-anchor"
 version = "0.2"
 description = "DNSSEC Trust Anchor Tools"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = "BSD-2-Clause"
 dependencies = [
     "cryptography>=41.0",
@@ -19,7 +19,7 @@ classifiers = [
 Repository = "https://github.com/iana-org/get-trust-anchor/"
 
 [project.optional-dependencies]
-dev = ["ruff>=0.4", "pytest>=7"]
+dev = ["ruff>=0.4", "ty>=0.0.1a7", "pytest>=7"]
 test = ["pytest>=7"]
 
 [project.scripts]
@@ -30,6 +30,14 @@ include = ["get_trust_anchor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ty.environment]
+python-platform = "all"
+
+[tool.ty.rules]
+# Third-party imports (cryptography, pytest) may not be resolvable in all
+# environments — these are checked at runtime and during CI installation.
+unresolved-import = "ignore"
 
 [tool.ruff]
 line-length = 100

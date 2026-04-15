@@ -30,7 +30,7 @@ DNSSEC Trust Anchor Fetcher
 
 This tool writes out a copy of the current DNSSEC trust anchor.
     The primary design goal for this software is that it should be able to be run on any system
-    that has just Python 3.x and the OpenSSL command line tool.
+    that has just Python 3.10+ and the cryptography library.
 
 The steps it uses are:
     Step 1. Fetch the trust anchor file from IANA using HTTPS
@@ -46,7 +46,7 @@ URL. This means that even if HTTPS authentication checking isn't done, the resul
 trust anchors are still cryptographically validated.
 """
 
-# pylint: disable=wrong-import-order,wrong-import-position,import-error,no-name-in-module,broad-except,bare-except,too-many-locals
+from __future__ import annotations
 
 import argparse
 import base64
@@ -61,7 +61,9 @@ import struct
 import sys
 import tempfile
 import xml.etree.ElementTree
+from collections.abc import Generator
 from io import StringIO
+from typing import Any, NoReturn
 from urllib.request import urlopen
 
 from cryptography import x509
@@ -69,6 +71,11 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.serialization.pkcs7 import load_der_pkcs7_certificates
+
+# Type aliases
+KskDict = dict[str, str | int]
+TrustAnchorDict = dict[str, str]
+SignerInfoDict = dict[str, bytes]
 
 ICANN_ROOT_CA_CERT = """
 -----BEGIN CERTIFICATE-----
@@ -100,18 +107,18 @@ URL_ROOT_ZONE = "https://www.internic.net/domain/root.zone"
 URL_RESOLVER_API = "https://dns.google.com/resolve?name=.&type=dnskey"
 
 
-def die(*Strings):
+def die(*Strings: str) -> NoReturn:
     """Generic way to leave the program early"""
     sys.stderr.write("".join(Strings) + " Exiting.\n")
     exit(1)
 
 
-def log(*args, **kwargs):
+def log(*args: Any, **kwargs: Any) -> None:
     """Print a status message to stderr."""
     print(*args, file=sys.stderr, **kwargs)
 
 
-def bytes_to_string(byte_array):
+def bytes_to_string(byte_array: bytes | str) -> str:
     """Convert bytes that are in ASCII into strings.
     This is used for content received over URLs."""
     if isinstance(byte_array, str):
@@ -120,7 +127,7 @@ def bytes_to_string(byte_array):
     return ascii_codec.decode(byte_array)[0]
 
 
-def write_out_file(file_name, file_contents):
+def write_out_file(file_name: str, file_contents: str | bytes) -> None:
     """Takes a name of a file and string or bytearray; returns nothing.
     Writes out a file that we got from a URL or string; backs up the file if it exists."""
     # Back up the current one if it is there
@@ -142,7 +149,7 @@ def write_out_file(file_name, file_contents):
     return
 
 
-def dnskey_to_hex_of_hash(dnskey_dict, hash_type):
+def dnskey_to_hex_of_hash(dnskey_dict: KskDict, hash_type: str) -> str:
     """Takes a DNSKEY dict and hash type (string), and returns the hex of the hash as a string"""
     if hash_type == "1":
         this_hash = hashlib.sha1()
@@ -155,16 +162,16 @@ def dnskey_to_hex_of_hash(dnskey_dict, hash_type):
     digest_content.extend(
         struct.pack("!HBB", int(dnskey_dict["f"]), int(dnskey_dict["p"]), int(dnskey_dict["a"]))
     )
-    key_bytes = base64.b64decode(dnskey_dict["k"])
+    key_bytes = base64.b64decode(str(dnskey_dict["k"]))
     digest_content.extend(key_bytes)
     this_hash.update(digest_content)
     return (this_hash.hexdigest()).upper()
 
 
-def extract_ksks_from_trust_anchors(valid_trust_anchors):
+def extract_ksks_from_trust_anchors(valid_trust_anchors: list[TrustAnchorDict]) -> list[KskDict]:
     """Extract and return the KSKs from the parsed trust anchors."""
     log("Extracting KSKs from trust anchor...")
-    ksks = []
+    ksks: list[KskDict] = []
     for i, anchor in enumerate(valid_trust_anchors):
         if "PublicKey" not in anchor or "Flags" not in anchor:
             log(f"Trust anchor {i} does not include both PublicKey and Flags values.")
@@ -180,7 +187,7 @@ def extract_ksks_from_trust_anchors(valid_trust_anchors):
     return ksks
 
 
-def fetch_ksk():
+def fetch_ksk() -> list[KskDict]:
     """Return the KSKs, or die if they can't be found in via Google nor the zone file"""
     log("Fetching via Google Public DNS...")
     ksks = fetch_ksk_from_google()
@@ -194,9 +201,9 @@ def fetch_ksk():
     return ksks
 
 
-def fetch_ksk_from_google():
+def fetch_ksk_from_google() -> list[KskDict] | None:
     """Return the root KSK via Google DNS-over-HTTPS. Returns None if there are errors."""
-    ksks = []
+    ksks: list[KskDict] = []
     try:
         url = urlopen(URL_RESOLVER_API)
     except Exception as this_exception:
@@ -218,9 +225,9 @@ def fetch_ksk_from_google():
     return ksks
 
 
-def fetch_ksk_from_zonefile():
+def fetch_ksk_from_zonefile() -> list[KskDict] | None:
     """Rethurn the root KSK from the root zone file. Returns None if there are errors."""
-    ksks = []
+    ksks: list[KskDict] = []
     try:
         url = urlopen(URL_ROOT_ZONE)
     except Exception as this_exception:
@@ -234,7 +241,7 @@ def fetch_ksk_from_zonefile():
     return ksks
 
 
-def _der_read(data, offset):
+def _der_read(data: bytes, offset: int) -> tuple[int, bytes, int]:
     """Read a DER TLV at offset. Returns (tag, value_bytes, next_offset)."""
     tag = data[offset]
     offset += 1
@@ -249,7 +256,7 @@ def _der_read(data, offset):
     return tag, data[offset : offset + length], offset + length
 
 
-def _der_elements(data):
+def _der_elements(data: bytes) -> Generator[tuple[int, bytes]]:
     """Yield (tag, value) for each TLV element in a DER SEQUENCE/SET body."""
     offset = 0
     while offset < len(data):
@@ -257,7 +264,7 @@ def _der_elements(data):
         yield tag, value
 
 
-def _der_encode_length(length):
+def _der_encode_length(length: int) -> bytes:
     """Encode a length value in DER format."""
     if length < 0x80:
         return bytes([length])
@@ -269,20 +276,20 @@ def _der_encode_length(length):
 _OID_MESSAGE_DIGEST = b"\x2a\x86\x48\x86\xf7\x0d\x01\x09\x04"
 
 # Digest algorithm OIDs to cryptography hash classes
-_DIGEST_ALGORITHMS = {
+_DIGEST_ALGORITHMS: dict[bytes, type[hashes.SHA256] | type[hashes.SHA1]] = {
     b"\x60\x86\x48\x01\x65\x03\x04\x02\x01": hashes.SHA256,  # 2.16.840.1.101.3.4.2.1
     b"\x2b\x0e\x03\x02\x1a": hashes.SHA1,  # 1.3.14.3.2.26
 }
 
 
-def _extract_pkcs7_signer_info(der_data):
+def _extract_pkcs7_signer_info(der_data: bytes) -> SignerInfoDict:
     """Parse a DER-encoded PKCS7 SignedData and extract the first SignerInfo.
 
     Returns a dict with keys: digest_algorithm, auth_attrs_value,
     message_digest, signature."""
     # ContentInfo SEQUENCE -> find [0] EXPLICIT containing SignedData
     _, ci_body, _ = _der_read(der_data, 0)
-    signed_data_wrapper = None
+    signed_data_wrapper: bytes | None = None
     for tag, value in _der_elements(ci_body):
         if tag == 0xA0:
             signed_data_wrapper = value
@@ -292,7 +299,7 @@ def _extract_pkcs7_signer_info(der_data):
 
     # SignedData SEQUENCE -> find signerInfos (last SET)
     _, sd_body, _ = _der_read(signed_data_wrapper, 0)
-    last_set = None
+    last_set: bytes | None = None
     for tag, value in _der_elements(sd_body):
         if tag == 0x31:  # SET (first is digestAlgorithms, last is signerInfos)
             last_set = value
@@ -303,7 +310,7 @@ def _extract_pkcs7_signer_info(der_data):
     _, si_body, _ = _der_read(last_set, 0)
     si_elements = list(_der_elements(si_body))
 
-    result = {}
+    result: SignerInfoDict = {}
 
     # digestAlgorithm is the second SEQUENCE (first is sid/issuerAndSerialNumber)
     seq_count = 0
@@ -338,13 +345,15 @@ def _extract_pkcs7_signer_info(der_data):
     return result
 
 
-def validate_detached_signature(content, signature_der, ca_pem):
+def validate_detached_signature(
+    content: bytes | str, signature_der: bytes, ca_pem: str | bytes
+) -> None:
     """Verify a DER-encoded PKCS7 detached signature against a CA certificate.
 
     Args:
         content: the signed content (bytes or str)
         signature_der: DER-encoded PKCS7 signature (bytes)
-        ca_pem: PEM-encoded CA certificate (str)
+        ca_pem: PEM-encoded CA certificate (str or bytes)
     """
     if isinstance(content, str):
         content = content.encode()
@@ -360,7 +369,7 @@ def validate_detached_signature(content, signature_der, ca_pem):
     # Verify the signer certificate was issued by the CA
     ca_cert = x509.load_pem_x509_certificate(ca_pem)
     try:
-        ca_cert.public_key().verify(
+        ca_cert.public_key().verify(  # type: ignore[union-attr]
             signer_cert.signature,
             signer_cert.tbs_certificate_bytes,
             padding.PKCS1v15(),
@@ -380,15 +389,15 @@ def validate_detached_signature(content, signature_der, ca_pem):
 
     # Determine the digest algorithm
     alg_oid = signer_info.get("digest_algorithm")
-    hash_class = _DIGEST_ALGORITHMS.get(alg_oid)
+    hash_class = _DIGEST_ALGORITHMS.get(alg_oid) if alg_oid is not None else None
     if hash_class is None:
         die("Unsupported digest algorithm in signature.")
 
     if "auth_attrs_value" in signer_info:
         # Verify content digest matches the messageDigest attribute
-        content_digest = hashes.Hash(hash_class())
-        content_digest.update(content)
-        content_digest = content_digest.finalize()
+        content_hash = hashes.Hash(hash_class())
+        content_hash.update(content)
+        content_digest = content_hash.finalize()
 
         if signer_info.get("message_digest") != content_digest:
             die("Content digest does not match the messageDigest in the signature.")
@@ -400,7 +409,7 @@ def validate_detached_signature(content, signature_der, ca_pem):
         attrs_der = bytes([0x31]) + _der_encode_length(len(attrs)) + attrs
 
         try:
-            signer_cert.public_key().verify(
+            signer_cert.public_key().verify(  # type: ignore[union-attr]
                 signer_info["signature"],
                 attrs_der,
                 padding.PKCS1v15(),
@@ -411,7 +420,7 @@ def validate_detached_signature(content, signature_der, ca_pem):
     else:
         # No authenticated attributes; verify signature directly over content
         try:
-            signer_cert.public_key().verify(
+            signer_cert.public_key().verify(  # type: ignore[union-attr]
                 signer_info["signature"],
                 content,
                 padding.PKCS1v15(),
@@ -423,7 +432,7 @@ def validate_detached_signature(content, signature_der, ca_pem):
     log("Validation of the signature over the file succeeded.")
 
 
-def extract_trust_anchors_from_xml(trust_anchor_xml):
+def extract_trust_anchors_from_xml(trust_anchor_xml: bytes | str) -> list[TrustAnchorDict]:
     """Takes a bytestring with the XML from IANA; returns a list of trust anchors."""
     # Turn the bytes from trust_anchor_xml into a string
     trust_anchor_xml_string = bytes_to_string(trust_anchor_xml)
@@ -437,22 +446,21 @@ def extract_trust_anchors_from_xml(trust_anchor_xml):
     # Get all the KeyDigest elements
     digest_elements = trust_anchor_tree.findall(".//KeyDigest")
     log(f"There were {len(digest_elements)} KeyDigest elements in the trust anchor file.")
-    trust_anchors = []  # Global list of dicts that is taken from the XML file
+    trust_anchors: list[TrustAnchorDict] = []
     # Collect the values for the KeyDigest subelements and attributes
     for count, this_digest_element in enumerate(digest_elements):
-        digest_value_dict = {}
+        digest_value_dict: TrustAnchorDict = {}
         for this_subelement in ["KeyTag", "Algorithm", "DigestType", "Digest"]:
-            try:
-                this_key_tag_text = (this_digest_element.find(this_subelement)).text
-            except:
+            sub_element = this_digest_element.find(this_subelement)
+            if sub_element is None or sub_element.text is None:
                 die(f"Did not find {this_subelement} element in a KeyDigest in a trust anchor.")
-            digest_value_dict[this_subelement] = this_key_tag_text
+            digest_value_dict[this_subelement] = sub_element.text
         # Optional values
         for this_subelement in ["PublicKey", "Flags"]:
             value = this_digest_element.find(this_subelement)
             if value is None:
                 continue
-            digest_value_dict[this_subelement] = value.text
+            digest_value_dict[this_subelement] = value.text or ""
         for this_attribute in ["validFrom", "validUntil"]:
             if this_attribute in this_digest_element.keys():  # noqa: SIM118
                 digest_value_dict[this_attribute] = this_digest_element.attrib[this_attribute]
@@ -466,10 +474,10 @@ def extract_trust_anchors_from_xml(trust_anchor_xml):
     return trust_anchors
 
 
-def get_valid_trust_anchors(trust_anchors):
+def get_valid_trust_anchors(trust_anchors: list[TrustAnchorDict]) -> list[TrustAnchorDict]:
     """Takes a list of trust anchors; returns the list of trust anchors that are valid"""
     # Keep a list of just the valid trust anchors because some things are not going to go into it.
-    valid_trust_anchors = []
+    valid_trust_anchors: list[TrustAnchorDict] = []
     now_datetime = datetime.datetime.now()
     for count, this_anchor in enumerate(trust_anchors):
         # Check the validity times; these only need to be accurate within a day or so
@@ -515,23 +523,23 @@ def get_valid_trust_anchors(trust_anchors):
     return valid_trust_anchors
 
 
-def get_matching_ksk(ksk_records, valid_trust_anchors):
+def get_matching_ksk(
+    ksk_records: list[KskDict], valid_trust_anchors: list[TrustAnchorDict]
+) -> list[KskDict]:
     """Takes in a list of KSKs and a list of trust anchors; returns a list of the KSKs"""
-    matched_ksks = []
+    matched_ksks: list[KskDict] = []
     for this_ksk_record in ksk_records:
         try:
             # check base64 syntax
-            base64.b64decode(this_ksk_record["k"])
+            base64.b64decode(str(this_ksk_record["k"]))
         except:
-            die(f"The KSK '{this_ksk_record[0:15]}...{this_ksk_record[-15:]}' had bad Base64.")
+            key_str = str(this_ksk_record["k"])
+            die(f"The KSK '{key_str[0:15]}...{key_str[-15:]}' had bad Base64.")
         for count, this_trust_anchor in enumerate(valid_trust_anchors):
             hash_as_hex = dnskey_to_hex_of_hash(this_ksk_record, this_trust_anchor["DigestType"])
             if hash_as_hex == this_trust_anchor["Digest"]:
-                log(
-                    "Trust anchor {} matched KSK '{}...{}'".format(
-                        count, this_ksk_record["k"][0:15], this_ksk_record["k"][-15:]
-                    )
-                )
+                key_b64 = str(this_ksk_record["k"])
+                log(f"Trust anchor {count} matched KSK '{key_b64[0:15]}...{key_b64[-15:]}'")
                 matched_ksks.append(this_ksk_record)
                 break  # Don't check more trust anchors against this KSK
     if len(matched_ksks) == 0:
@@ -541,7 +549,7 @@ def get_matching_ksk(ksk_records, valid_trust_anchors):
     return matched_ksks
 
 
-def format_records(valid_ksks):
+def format_records(valid_ksks: list[KskDict]) -> tuple[str, str]:
     """Takes a list of KSKs; returns (dnskey_records, ds_records) as strings."""
     dnskey_record_contents = ""
     ds_record_contents = ""
@@ -566,7 +574,7 @@ def format_records(valid_ksks):
                 int(this_matched_ksk["a"]),
             )
         )
-        key_bytes = base64.b64decode(this_matched_ksk["k"])
+        key_bytes = base64.b64decode(str(this_matched_ksk["k"]))
         tag_base.extend(key_bytes)
         accumulator = 0
         for counter, this_byte in enumerate(tag_base):
@@ -583,7 +591,9 @@ def format_records(valid_ksks):
     return dnskey_record_contents, ds_record_contents
 
 
-def export_ksk(valid_ksks, ds_record_filename, dnskey_record_filename):
+def export_ksk(
+    valid_ksks: list[KskDict], ds_record_filename: str, dnskey_record_filename: str
+) -> None:
     """Takes a list of KSKs; returns nothing but writes out files"""
     dnskey_record_contents, ds_record_contents = format_records(valid_ksks)
 
@@ -594,7 +604,7 @@ def export_ksk(valid_ksks, ds_record_filename, dnskey_record_filename):
     write_out_file(ds_record_filename, ds_record_contents)
 
 
-def main():
+def main() -> int:
     """Main function"""
 
     # Where the files we create are kept
@@ -655,6 +665,7 @@ def main():
     opts = cmd_parse.parse_args()
 
     ### Step 1. Fetch the trust anchor file from IANA using HTTPS
+    trust_anchor_xml: str | bytes
     if opts.local:
         if not os.path.exists(opts.local):
             die(f"Could not find file {opts.local}.")
@@ -677,7 +688,7 @@ def main():
 
     ### Step 2. Fetch the S/MIME signature for the trust anchor file from
     ### IANA using HTTPS.
-    signature_contents = None
+    signature_contents: bytes | None = None
     if opts.local_sig:
         if not os.path.exists(opts.local_sig):
             die(f"Could not find file {opts.local_sig}.")
@@ -710,7 +721,7 @@ def main():
                 die(f"Could not read CA file {opts.root_ca}.")
         else:
             ca_pem = ICANN_ROOT_CA_CERT
-        validate_detached_signature(trust_anchor_xml, signature_contents, ca_pem)
+        validate_detached_signature(trust_anchor_xml, signature_contents, ca_pem)  # type: ignore[arg-type]
     else:
         log("Not validating the local trust anchor file.")
 
@@ -732,8 +743,8 @@ def main():
                 flags=key["f"],
                 proto=key["p"],
                 alg=key["a"],
-                keystart=key["k"][0:15],
-                keyend=key["k"][-15:],
+                keystart=str(key["k"])[0:15],
+                keyend=str(key["k"])[-15:],
             )
         )
     # Go trough all the KSKs, decoding them and comparing them to all the trust anchors
