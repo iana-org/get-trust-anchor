@@ -1,6 +1,5 @@
 """Tests for get_trust_anchor."""
 
-import datetime
 import os
 import subprocess
 import sys
@@ -8,23 +7,23 @@ import sys
 import pytest
 
 from get_trust_anchor.cli import (
-    _der_read,
     _der_elements,
     _der_encode_length,
+    _der_read,
     _extract_pkcs7_signer_info,
     bytes_to_string,
     dnskey_to_hex_of_hash,
+    export_ksk,
     extract_ksks_from_trust_anchors,
     extract_trust_anchors_from_xml,
     get_matching_ksk,
     get_valid_trust_anchors,
-    export_ksk,
     validate_detached_signature,
     write_out_file,
 )
 
-
 # --- bytes_to_string ---
+
 
 class TestBytesToString:
     def test_pass_through_str(self):
@@ -41,6 +40,7 @@ class TestBytesToString:
 
 
 # --- dnskey_to_hex_of_hash ---
+
 
 class TestDnskeyToHexOfHash:
     def test_sha256_ksk_2017(self, ksk_2017):
@@ -63,6 +63,7 @@ class TestDnskeyToHexOfHash:
 
 
 # --- extract_trust_anchors_from_xml ---
+
 
 class TestExtractTrustAnchorsFromXml:
     def test_parses_all_digests(self, sample_xml):
@@ -112,11 +113,16 @@ class TestExtractTrustAnchorsFromXml:
 
 # --- get_valid_trust_anchors ---
 
+
 class TestGetValidTrustAnchors:
     def _make_anchor(self, valid_from, valid_until=""):
         return {
-            "KeyTag": "12345", "Algorithm": "8", "DigestType": "2",
-            "Digest": "AABB", "validFrom": valid_from, "validUntil": valid_until,
+            "KeyTag": "12345",
+            "Algorithm": "8",
+            "DigestType": "2",
+            "Digest": "AABB",
+            "validFrom": valid_from,
+            "validUntil": valid_until,
         }
 
     def test_current_anchor_passes(self):
@@ -163,6 +169,7 @@ class TestGetValidTrustAnchors:
 
 # --- extract_ksks_from_trust_anchors ---
 
+
 class TestExtractKsksFromTrustAnchors:
     def test_extracts_ksks(self, sample_xml_with_publickey):
         anchors = extract_trust_anchors_from_xml(sample_xml_with_publickey)
@@ -181,6 +188,7 @@ class TestExtractKsksFromTrustAnchors:
 
 
 # --- get_matching_ksk ---
+
 
 class TestGetMatchingKsk:
     def test_matching_ksk_found(self, ksk_2017):
@@ -213,6 +221,7 @@ class TestGetMatchingKsk:
 
 
 # --- export_ksk ---
+
 
 class TestExportKsk:
     def test_writes_dnskey_and_ds(self, tmp_dir, ksk_2017):
@@ -247,6 +256,7 @@ class TestExportKsk:
 
 # --- write_out_file ---
 
+
 class TestWriteOutFile:
     def test_writes_string(self, tmp_dir):
         write_out_file("test.txt", "hello world")
@@ -270,11 +280,13 @@ class TestWriteOutFile:
 
 # --- CLI integration ---
 
+
 class TestCLI:
     def test_help(self):
         result = subprocess.run(
             [sys.executable, "-m", "get_trust_anchor", "--help"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         assert result.returncode == 0
         assert "DNSSEC Trust Anchor Tool" in result.stdout
@@ -282,7 +294,8 @@ class TestCLI:
     def test_local_file_not_found(self, tmp_dir):
         result = subprocess.run(
             [sys.executable, "-m", "get_trust_anchor", "--local", "nonexistent.xml"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         assert result.returncode != 0
 
@@ -294,12 +307,19 @@ class TestCLI:
         with open(sig_path, "wb") as f:
             f.write(b"\x00")  # dummy signature; validation is disabled
         result = subprocess.run(
-            [sys.executable, "-m", "get_trust_anchor",
-             "--local", xml_path,
-             "--local-sig", sig_path,
-             "--no-validation",
-             "--ksks-from-trust-anchor"],
-            capture_output=True, text=True,
+            [
+                sys.executable,
+                "-m",
+                "get_trust_anchor",
+                "--local",
+                xml_path,
+                "--local-sig",
+                sig_path,
+                "--no-validation",
+                "--ksks-from-trust-anchor",
+            ],
+            capture_output=True,
+            text=True,
             cwd=str(tmp_dir),
         )
         assert result.returncode == 0, result.stderr
@@ -318,6 +338,7 @@ class TestCLI:
 
 # --- DER parsing ---
 
+
 class TestDerRead:
     def test_short_length(self):
         # OCTET STRING, length 3, value 0x01 0x02 0x03
@@ -330,7 +351,7 @@ class TestDerRead:
     def test_long_length(self):
         # OCTET STRING, length 200 (0x81 0xc8)
         payload = bytes(200)
-        data = bytes([0x04, 0x81, 0xc8]) + payload
+        data = bytes([0x04, 0x81, 0xC8]) + payload
         tag, value, next_offset = _der_read(data, 0)
         assert tag == 0x04
         assert len(value) == 200
@@ -339,7 +360,7 @@ class TestDerRead:
     def test_two_byte_length(self):
         # OCTET STRING, length 300 (0x82 0x01 0x2c)
         payload = bytes(300)
-        data = bytes([0x04, 0x82, 0x01, 0x2c]) + payload
+        data = bytes([0x04, 0x82, 0x01, 0x2C]) + payload
         tag, value, next_offset = _der_read(data, 0)
         assert tag == 0x04
         assert len(value) == 300
@@ -355,11 +376,11 @@ class TestDerRead:
 class TestDerElements:
     def test_sequence_of_integers(self):
         # Two INTEGERs: 0x02 0x01 0x05 and 0x02 0x01 0x0a
-        body = bytes([0x02, 0x01, 0x05, 0x02, 0x01, 0x0a])
+        body = bytes([0x02, 0x01, 0x05, 0x02, 0x01, 0x0A])
         elements = list(_der_elements(body))
         assert len(elements) == 2
         assert elements[0] == (0x02, bytes([0x05]))
-        assert elements[1] == (0x02, bytes([0x0a]))
+        assert elements[1] == (0x02, bytes([0x0A]))
 
 
 class TestDerEncodeLength:
@@ -378,6 +399,7 @@ class TestDerEncodeLength:
 
 # --- PKCS7 signature verification ---
 
+
 class TestValidateDetachedSignature:
     """Tests using a self-signed test CA and PKCS7 signature generated
     with the cryptography library."""
@@ -385,11 +407,12 @@ class TestValidateDetachedSignature:
     @pytest.fixture
     def test_pkcs7(self):
         """Generate a test CA, signer cert, and PKCS7 detached signature."""
+        import datetime as dt
+
         from cryptography import x509
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
         from cryptography.hazmat.primitives.serialization import pkcs7 as pkcs7_builder
-        import datetime as dt
 
         # Generate CA key and self-signed cert
         ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -444,10 +467,11 @@ class TestValidateDetachedSignature:
             validate_detached_signature(b"tampered content", signature_der, ca_pem)
 
     def test_wrong_ca(self, test_pkcs7):
+        import datetime as dt
+
         from cryptography import x509
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
-        import datetime as dt
 
         content, signature_der, _ = test_pkcs7
 
@@ -481,9 +505,9 @@ class TestValidateDetachedSignature:
         """Verify the DER parser extracts expected fields from a real PKCS7."""
         _, signature_der, _ = test_pkcs7
         info = _extract_pkcs7_signer_info(signature_der)
-        assert 'digest_algorithm' in info
-        assert 'auth_attrs_value' in info
-        assert 'message_digest' in info
-        assert 'signature' in info
-        assert len(info['signature']) > 0
-        assert len(info['message_digest']) == 32  # SHA-256 digest
+        assert "digest_algorithm" in info
+        assert "auth_attrs_value" in info
+        assert "message_digest" in info
+        assert "signature" in info
+        assert len(info["signature"]) > 0
+        assert len(info["message_digest"]) == 32  # SHA-256 digest

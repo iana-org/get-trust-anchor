@@ -62,10 +62,18 @@ The tool writes two files to the current directory:
 
 ## Development
 
+Install with development dependencies:
+
+    pip install -e ".[dev]"
+
 Run the tests:
 
-    pip install -e ".[test]"
     pytest
+
+Check formatting and lint:
+
+    ruff format --check .
+    ruff check .
 
 ## Root zone trust anchors
 

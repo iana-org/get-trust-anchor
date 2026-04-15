@@ -19,6 +19,7 @@ classifiers = [
 Repository = "https://github.com/iana-org/get-trust-anchor/"
 
 [project.optional-dependencies]
+dev = ["ruff>=0.4", "pytest>=7"]
 test = ["pytest>=7"]
 
 [project.scripts]
@@ -29,3 +30,27 @@ include = ["get_trust_anchor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "SIM",    # flake8-simplify
+    "S",      # flake8-bandit (security)
+]
+ignore = [
+    "E722",   # bare-except (pre-existing style, not changing in this pass)
+    "S310",   # suspicious-url-open-usage (intentional URL fetching)
+    "S324",   # sha1 usage (required by DNSSEC DS digest type 1)
+    "SIM115", # context-manager for open (not warranted in all cases here)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S603"]  # assert and subprocess calls are expected in tests
