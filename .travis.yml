@@ -1,5 +1,0 @@
-language: python
-matrix:
-  include:
-  - python: "3.12"
-    script: make regress_offline
