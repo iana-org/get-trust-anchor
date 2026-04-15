@@ -70,6 +70,7 @@ from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from cryptography.hazmat.primitives.serialization.pkcs7 import load_der_pkcs7_certificates
 
 # Type aliases
@@ -366,10 +367,15 @@ def validate_detached_signature(
         die("No certificates found in the signature file.")
     signer_cert = certs[0]
 
-    # Verify the signer certificate was issued by the CA
+    # Verify the signer certificate was issued by the CA (ICANN uses RSA)
     ca_cert = x509.load_pem_x509_certificate(ca_pem)
+    ca_public_key = ca_cert.public_key()
+    if not isinstance(ca_public_key, RSAPublicKey):
+        die("Expected RSA public key in CA certificate.")
+    if signer_cert.signature_hash_algorithm is None:
+        die("Signer certificate has no signature hash algorithm.")
     try:
-        ca_cert.public_key().verify(  # type: ignore[union-attr]
+        ca_public_key.verify(
             signer_cert.signature,
             signer_cert.tbs_certificate_bytes,
             padding.PKCS1v15(),
@@ -393,6 +399,10 @@ def validate_detached_signature(
     if hash_class is None:
         die("Unsupported digest algorithm in signature.")
 
+    signer_public_key = signer_cert.public_key()
+    if not isinstance(signer_public_key, RSAPublicKey):
+        die("Expected RSA public key in signer certificate.")
+
     if "auth_attrs_value" in signer_info:
         # Verify content digest matches the messageDigest attribute
         content_hash = hashes.Hash(hash_class())
@@ -409,7 +419,7 @@ def validate_detached_signature(
         attrs_der = bytes([0x31]) + _der_encode_length(len(attrs)) + attrs
 
         try:
-            signer_cert.public_key().verify(  # type: ignore[union-attr]
+            signer_public_key.verify(
                 signer_info["signature"],
                 attrs_der,
                 padding.PKCS1v15(),
@@ -420,7 +430,7 @@ def validate_detached_signature(
     else:
         # No authenticated attributes; verify signature directly over content
         try:
-            signer_cert.public_key().verify(  # type: ignore[union-attr]
+            signer_public_key.verify(
                 signer_info["signature"],
                 content,
                 padding.PKCS1v15(),
