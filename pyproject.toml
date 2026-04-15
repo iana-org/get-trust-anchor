@@ -15,8 +15,14 @@ classifiers = [
 [project.urls]
 Repository = "https://github.com/iana-org/get-trust-anchor/"
 
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
 [project.scripts]
 get-trust-anchor = "get_trust_anchor.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["get_trust_anchor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

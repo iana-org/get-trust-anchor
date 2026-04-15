@@ -18,20 +18,13 @@ $(VENV):
 	python3 -m venv $(VENV)
 
 test: $(VENV)
-	(. $(VENV)/bin/activate; $(MAKE) regress_offline regress_online)
-
-regress_offline:
-	python -m py_compile get_trust_anchor/cli.py
-
-regress_online:
-	python -m get_trust_anchor
-	diff -u regress/ksk-as-dnskey.txt ksk-as-dnskey.txt
-	diff -u regress/ksk-as-ds.txt ksk-as-ds.txt
+	$(VENV)/bin/pip install -e ".[test]"
+	$(VENV)/bin/pytest
 
 clean:
 	rm -fr $(DISTDIRS)
 	rm -f $(TMPFILES)
-	rm -fr __pycache__ get_trust_anchor/__pycache__ *.pyc
+	rm -fr __pycache__ get_trust_anchor/__pycache__ tests/__pycache__ *.pyc .pytest_cache
 
 realclean: clean
 	rm -rf $(VENV)
