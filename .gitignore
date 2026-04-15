@@ -3,7 +3,7 @@
 ksk-as-*.txt
 root.zone
 root-anchors.*
-!tests/fixtures/root-anchors*.xml
+!tests/fixtures/
 venv
 __pycache__
 *.egg-info
