@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "get-trust-anchor"
+version = "0.2"
+description = "DNSSEC Trust Anchor Tools"
+requires-python = ">=3.8"
+license = "BSD-2-Clause"
+classifiers = [
+    "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Repository = "https://github.com/iana-org/get-trust-anchor/"
+
+[project.scripts]
+get-trust-anchor = "get_trust_anchor.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["get_trust_anchor"]
