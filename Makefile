@@ -1,8 +1,4 @@
-VENV2=		venv2
-VENV3=		venv3
-
-PYTHON2=	python2.7
-PYTHON3=	python3.5
+VENV=		venv
 
 DISTDIRS=	*.egg-info build dist
 TMPFILES=	ksk-as-{dnskey,ds}.txt \
@@ -11,45 +7,31 @@ TMPFILES=	ksk-as-{dnskey,ds}.txt \
 all:
 
 lint:
-	$(VENV3)/bin/pylint --reports=no *.py
+	$(VENV)/bin/pylint --reports=no get_trust_anchor/
 
 wheel:
-	python setup.py bdist_wheel
+	python -m build
 
-venv: $(VENV2) $(VENV3)
+venv: $(VENV)
 
-$(VENV2):
-	virtualenv -p $(PYTHON2) $(VENV2)
+$(VENV):
+	python3 -m venv $(VENV)
 
-$(VENV3):
-	virtualenv -p $(PYTHON3) $(VENV3)
+test: $(VENV)
+	(. $(VENV)/bin/activate; $(MAKE) regress_offline regress_online)
 
-test: test2 test3
+regress_offline:
+	python -m py_compile get_trust_anchor/cli.py
 
-test2: $(VENV2)
-	(. $(VENV2)/bin/activate; $(MAKE) regress2_offline regress2_online)
-
-test3: $(VENV3)
-	(. $(VENV3)/bin/activate; $(MAKE) regress3_offline regress3_online)
-
-regress2_offline:
-	python -m py_compile get_trust_anchor.py
-
-regress2_online:
-	python get_trust_anchor.py
+regress_online:
+	python -m get_trust_anchor
 	diff -u regress/ksk-as-dnskey.txt ksk-as-dnskey.txt
 	diff -u regress/ksk-as-ds.txt ksk-as-ds.txt
-
-regress3_online: regress2_online
-	python -m py_compile get_trust_anchor.py
-
-regress3_offline:
-	python -m py_compile get_trust_anchor.py
 
 clean:
 	rm -fr $(DISTDIRS)
 	rm -f $(TMPFILES)
-	rm -fr __pycache__ *.pyc
+	rm -fr __pycache__ get_trust_anchor/__pycache__ *.pyc
 
 realclean: clean
-	rm -rf $(VENV2) $(VENV3)
+	rm -rf $(VENV)

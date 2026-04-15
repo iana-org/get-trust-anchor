@@ -1,7 +1,6 @@
-#!/usr/bin/env python
 #
 # DNSSEC Trust Anchor Fetcher
-# https://github.com/kirei/get_trust_anchor
+# https://github.com/iana-org/get-trust-anchor
 #
 # Copyright (c) 2016, Paul Hoffman. All rights reserved.
 #
@@ -27,11 +26,11 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 """
-DNSSEC Trust Anchor Fetcher (get_trust_anchor.py)
+DNSSEC Trust Anchor Fetcher
 
 This tool writes out a copy of the current DNSSEC trust anchor.
     The primary design goal for this software is that it should be able to be run on any system
-    that has just Python (either 2.7 or 3.x) and the OpenSSL command line tool.
+    that has just Python 3.x and the OpenSSL command line tool.
 
 The steps it uses are:
     Step 1. Fetch the trust anchor file from IANA using HTTPS
@@ -49,8 +48,6 @@ trust anchors are still cryptographically validated.
 
 # pylint: disable=wrong-import-order,wrong-import-position,import-error,no-name-in-module,broad-except,bare-except,too-many-locals
 
-from __future__ import print_function
-
 import argparse
 import base64
 import codecs
@@ -65,6 +62,8 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree
+from io import StringIO
+from urllib.request import urlopen
 
 ICANN_ROOT_CA_CERT = '''
 -----BEGIN CERTIFICATE-----
@@ -100,19 +99,6 @@ def die(*Strings):
     """Generic way to leave the program early"""
     sys.stderr.write("".join(Strings) + " Exiting.\n")
     exit(1)
-
-PYTHON_MAJOR = int(sys.version_info[0])
-PYTHON_MINOR = int(sys.version_info[1])
-if (PYTHON_MAJOR == 2) and (PYTHON_MINOR != 7):
-    die("If this program is running in Python 2, it must be Python 2.7.")
-
-# Get the urlopen and StringIO functions
-if PYTHON_MAJOR == 2:
-    from urllib2 import urlopen
-    from StringIO import StringIO
-else:
-    from urllib.request import urlopen
-    from io import StringIO
 
 
 def bytes_to_string(byte_array):
@@ -257,10 +243,7 @@ def extract_trust_anchors_from_xml(trust_anchor_xml):
     if len(trust_anchor_xml_string) < 100:
         die("The XML was too short: {} chars.".format(len(trust_anchor_xml_string)))
     # ElementTree requries a file so use StringIO to turn the string into a file
-    try:
-        trust_anchor_as_file = StringIO(trust_anchor_xml_string)  # This works for Python 3
-    except:
-        trust_anchor_as_file = StringIO(unicode(trust_anchor_xml_string))  # Needed for Python 2
+    trust_anchor_as_file = StringIO(trust_anchor_xml_string)
     # Get the tree
     trust_anchor_tree = xml.etree.ElementTree.ElementTree(file=trust_anchor_as_file)
     # Get all the KeyDigest elements
@@ -406,7 +389,6 @@ def export_ksk(valid_ksks, ds_record_filename, dnskey_record_filename):
     write_out_file(ds_record_filename, ds_record_contents)
 
 
-
 def main():
     """Main function"""
 
@@ -525,5 +507,4 @@ def main():
                 except Exception as this_exception:
                     print("Could not delete {}: '{}'. Continuing".format(this_file, this_exception))
 
-if __name__ == "__main__":
-    main()
+    return 0
