@@ -324,10 +324,10 @@ class TestCLI:
         )
         assert result.returncode == 0, result.stderr
 
-        regress_dir = os.path.join(os.path.dirname(__file__), "..", "regress")
-        with open(os.path.join(regress_dir, "ksk-as-dnskey.txt")) as f:
+        fixtures_dir = os.path.join(os.path.dirname(__file__), "fixtures")
+        with open(os.path.join(fixtures_dir, "ksk-as-dnskey.txt")) as f:
             expected_dnskey = f.read()
-        with open(os.path.join(regress_dir, "ksk-as-ds.txt")) as f:
+        with open(os.path.join(fixtures_dir, "ksk-as-ds.txt")) as f:
             expected_ds = f.read()
 
         with open(str(tmp_dir / "ksk-as-dnskey.txt")) as f:
