@@ -106,6 +106,11 @@ def die(*Strings):
     exit(1)
 
 
+def log(*args, **kwargs):
+    """Print a status message to stderr."""
+    print(*args, file=sys.stderr, **kwargs)
+
+
 def bytes_to_string(byte_array):
     """Convert bytes that are in ASCII into strings.
     This is used for content received over URLs."""
@@ -158,11 +163,11 @@ def dnskey_to_hex_of_hash(dnskey_dict, hash_type):
 
 def extract_ksks_from_trust_anchors(valid_trust_anchors):
     """Extract and return the KSKs from the parsed trust anchors."""
-    print("Extracting KSKs from trust anchor...")
+    log("Extracting KSKs from trust anchor...")
     ksks = []
     for i, anchor in enumerate(valid_trust_anchors):
         if "PublicKey" not in anchor or "Flags" not in anchor:
-            print(f"Trust anchor {i} does not include both PublicKey and Flags values.")
+            log(f"Trust anchor {i} does not include both PublicKey and Flags values.")
             continue
         ksks.append(
             {
@@ -177,10 +182,10 @@ def extract_ksks_from_trust_anchors(valid_trust_anchors):
 
 def fetch_ksk():
     """Return the KSKs, or die if they can't be found in via Google nor the zone file"""
-    print("Fetching via Google Public DNS...")
+    log("Fetching via Google Public DNS...")
     ksks = fetch_ksk_from_google()
     if ksks is None:
-        print("Fetching via Google Public DNS failed. Fetching via the root zone file...")
+        log("Fetching via Google Public DNS failed. Fetching via the root zone file...")
         ksks = fetch_ksk_from_zonefile()
         if ksks is None:
             die("Could not fetch the KSKs from Google Public DNS nor get the root zone file.")
@@ -195,7 +200,7 @@ def fetch_ksk_from_google():
     try:
         url = urlopen(URL_RESOLVER_API)
     except Exception as this_exception:
-        print(
+        log(
             f"Was not able to open URL {URL_RESOLVER_API}."
             f" The returned text was '{this_exception}'."
         )
@@ -203,7 +208,7 @@ def fetch_ksk_from_google():
     try:
         data = json.loads(url.read().decode("utf-8"))
     except Exception as this_exception:
-        print(f"The JSON returned from Google DNS-over-HTTPS was not readable: {this_exception}")
+        log(f"The JSON returned from Google DNS-over-HTTPS was not readable: {this_exception}")
         return None
     for answer in data["Answer"]:
         if answer["type"] == 48:
@@ -219,9 +224,7 @@ def fetch_ksk_from_zonefile():
     try:
         url = urlopen(URL_ROOT_ZONE)
     except Exception as this_exception:
-        print(
-            f"Was not able to open URL {URL_ROOT_ZONE}. The returned text was '{this_exception}'."
-        )
+        log(f"Was not able to open URL {URL_ROOT_ZONE}. The returned text was '{this_exception}'.")
         return None
     for line in url.read().decode("utf-8").split("\n"):
         if "DNSKEY\t" in line:
@@ -417,7 +420,7 @@ def validate_detached_signature(content, signature_der, ca_pem):
         except InvalidSignature:
             die("PKCS7 signature verification failed.")
 
-    print("Validation of the signature over the file succeeded.")
+    log("Validation of the signature over the file succeeded.")
 
 
 def extract_trust_anchors_from_xml(trust_anchor_xml):
@@ -433,7 +436,7 @@ def extract_trust_anchors_from_xml(trust_anchor_xml):
     trust_anchor_tree = xml.etree.ElementTree.ElementTree(file=trust_anchor_as_file)
     # Get all the KeyDigest elements
     digest_elements = trust_anchor_tree.findall(".//KeyDigest")
-    print(f"There were {len(digest_elements)} KeyDigest elements in the trust anchor file.")
+    log(f"There were {len(digest_elements)} KeyDigest elements in the trust anchor file.")
     trust_anchors = []  # Global list of dicts that is taken from the XML file
     # Collect the values for the KeyDigest subelements and attributes
     for count, this_digest_element in enumerate(digest_elements):
@@ -456,7 +459,7 @@ def extract_trust_anchors_from_xml(trust_anchor_xml):
             else:
                 digest_value_dict[this_attribute] = ""  # Missing attributes get empty values
         # Save this to the global trust_anchors list
-        print(f"Added the trust anchor {count} to the list:\n{pprint.pformat(digest_value_dict)}")
+        log(f"Added the trust anchor {count} to the list:\n{pprint.pformat(digest_value_dict)}")
         trust_anchors.append(digest_value_dict)
     if len(trust_anchors) == 0:
         die("There were no trust anchors found in the XML file.")
@@ -471,7 +474,7 @@ def get_valid_trust_anchors(trust_anchors):
     for count, this_anchor in enumerate(trust_anchors):
         # Check the validity times; these only need to be accurate within a day or so
         if this_anchor["validFrom"] == "":
-            print(
+            log(
                 f"Trust anchor {count}: the validFrom attribute is empty,",
                 "so not using this trust anchor.",
             )
@@ -481,13 +484,13 @@ def get_valid_trust_anchors(trust_anchors):
         (from_year, from_month, from_day) = from_left.split("-")
         from_date_time = datetime.datetime(int(from_year), int(from_month), int(from_day))
         if now_datetime < from_date_time:
-            print(
+            log(
                 f"Trust anchor {count}: the validFrom '{from_date_time}' is later",
                 "than today, so not using this trust anchor.",
             )
             continue
         if this_anchor["validUntil"] == "":
-            print(
+            log(
                 f"Trust anchor {count}: there was no validUntil attribute,",
                 "so the validity is OK.",
             )
@@ -498,17 +501,17 @@ def get_valid_trust_anchors(trust_anchors):
             (until_year, until_month, until_day) = until_left.split("-")
             until_date_time = datetime.datetime(int(until_year), int(until_month), int(until_day))
             if now_datetime > until_date_time:
-                print(
+                log(
                     f"Trust anchor {count}: the validUntil '{until_date_time}'"
                     " is before today, so not using this trust anchor."
                 )
                 continue
             else:
-                print(f"Trust anchor {count}: the validity period passes.")
+                log(f"Trust anchor {count}: the validity period passes.")
                 valid_trust_anchors.append(this_anchor)
     if len(valid_trust_anchors) == 0:
         die("After checking validity dates, there were no trust anchors left.")
-    print(f"After the date validity checks, there are now {len(valid_trust_anchors)} records.")
+    log(f"After the date validity checks, there are now {len(valid_trust_anchors)} records.")
     return valid_trust_anchors
 
 
@@ -524,7 +527,7 @@ def get_matching_ksk(ksk_records, valid_trust_anchors):
         for count, this_trust_anchor in enumerate(valid_trust_anchors):
             hash_as_hex = dnskey_to_hex_of_hash(this_ksk_record, this_trust_anchor["DigestType"])
             if hash_as_hex == this_trust_anchor["Digest"]:
-                print(
+                log(
                     "Trust anchor {} matched KSK '{}...{}'".format(
                         count, this_ksk_record["k"][0:15], this_ksk_record["k"][-15:]
                     )
@@ -534,29 +537,24 @@ def get_matching_ksk(ksk_records, valid_trust_anchors):
     if len(matched_ksks) == 0:
         die("After checking for trust anchor matches, there were no trusted KSKs.")
     else:
-        print(f"There were {len(matched_ksks)} matched KSKs.")
+        log(f"There were {len(matched_ksks)} matched KSKs.")
     return matched_ksks
 
 
-def export_ksk(valid_ksks, ds_record_filename, dnskey_record_filename):
-    """Takes a list of KSKs; returns nothing but writes out files"""
-    ##############################
-    # Still to do:
-    #   BIND output formats
-    ##############################
-
+def format_records(valid_ksks):
+    """Takes a list of KSKs; returns (dnskey_records, ds_records) as strings."""
     dnskey_record_contents = ""
     ds_record_contents = ""
 
     for this_matched_ksk in valid_ksks:
-        # Write out the DNSKEY
+        # Format the DNSKEY
         dnskey_record_contents += ". IN DNSKEY {flags} {proto} {alg} {keyas64}\n".format(
             flags=this_matched_ksk["f"],
             proto=this_matched_ksk["p"],
             alg=this_matched_ksk["a"],
             keyas64=this_matched_ksk["k"],
         )
-        # Write out the DS
+        # Format the DS
         hash_as_hex = dnskey_to_hex_of_hash(this_matched_ksk, "2")  # Always do SHA256
         # Calculate the keytag
         tag_base = bytearray()
@@ -577,15 +575,22 @@ def export_ksk(valid_ksks, ds_record_filename, dnskey_record_filename):
             else:
                 accumulator += this_byte
         this_key_tag = ((accumulator & 0xFFFF) + (accumulator >> 16)) & 0xFFFF
-        print(f"The key tag for this KSK is {this_key_tag}")
+        log(f"The key tag for this KSK is {this_key_tag}")
         ds_record_contents += ". IN DS {keytag} {alg} 2 {sha256ofkey}\n".format(
             keytag=this_key_tag, alg=this_matched_ksk["a"], sha256ofkey=hash_as_hex
         )
 
-    print(f"Writing out {dnskey_record_filename}.")
+    return dnskey_record_contents, ds_record_contents
+
+
+def export_ksk(valid_ksks, ds_record_filename, dnskey_record_filename):
+    """Takes a list of KSKs; returns nothing but writes out files"""
+    dnskey_record_contents, ds_record_contents = format_records(valid_ksks)
+
+    log(f"Writing out {dnskey_record_filename}.")
     write_out_file(dnskey_record_filename, dnskey_record_contents)
 
-    print(f"Writing out {ds_record_filename}.")
+    log(f"Writing out {ds_record_filename}.")
     write_out_file(ds_record_filename, ds_record_contents)
 
 
@@ -634,6 +639,18 @@ def main():
         dest="keep",
         action="store_true",
         help="Keep the temporary files (the XML and validating signature",
+    )
+    cmd_parse.add_argument(
+        "--print-dnskey",
+        dest="print_dnskey",
+        action="store_true",
+        help="Print DNSKEY records to stdout instead of writing files",
+    )
+    cmd_parse.add_argument(
+        "--print-ds",
+        dest="print_ds",
+        action="store_true",
+        help="Print DS records to stdout instead of writing files",
     )
     opts = cmd_parse.parse_args()
 
@@ -695,7 +712,7 @@ def main():
             ca_pem = ICANN_ROOT_CA_CERT
         validate_detached_signature(trust_anchor_xml, signature_contents, ca_pem)
     else:
-        print("Not validating the local trust anchor file.")
+        log("Not validating the local trust anchor file.")
 
     ### Step 4. Extract the trust anchor key digests from the trust anchor file
     trust_anchors = extract_trust_anchors_from_xml(trust_anchor_xml)
@@ -710,7 +727,7 @@ def main():
     else:
         ksk_records = fetch_ksk()
     for key in ksk_records:
-        print(
+        log(
             "Found KSK {flags} {proto} {alg} '{keystart}...{keyend}'.".format(
                 flags=key["f"],
                 proto=key["p"],
@@ -723,17 +740,24 @@ def main():
     matched_ksks = get_matching_ksk(ksk_records, valid_trust_anchors)
 
     ### Step 7. Write out the trust anchors as a DNSKEY and DS records.
-    export_ksk(matched_ksks, ds_record_filename, dnskey_record_filename)
+    if opts.print_dnskey or opts.print_ds:
+        dnskey_records, ds_records = format_records(matched_ksks)
+        if opts.print_dnskey:
+            sys.stdout.write(dnskey_records)
+        if opts.print_ds:
+            sys.stdout.write(ds_records)
+    else:
+        export_ksk(matched_ksks, ds_record_filename, dnskey_record_filename)
     # Delete the temporary files unless requested not to
     if opts.keep:
-        print("Kept the temporary files: {}".format(" ".join(temp_files)))
+        log("Kept the temporary files: {}".format(" ".join(temp_files)))
     else:
-        print("Deleting the temporary files.")
+        log("Deleting the temporary files.")
         for this_file in temp_files:
             if os.path.exists(this_file):
                 try:
                     os.unlink(this_file)
                 except Exception as this_exception:
-                    print(f"Could not delete {this_file}: '{this_exception}'. Continuing")
+                    log(f"Could not delete {this_file}: '{this_exception}'. Continuing")
 
     return 0
