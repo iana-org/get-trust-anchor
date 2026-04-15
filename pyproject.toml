@@ -8,6 +8,9 @@ version = "0.2"
 description = "DNSSEC Trust Anchor Tools"
 requires-python = ">=3.8"
 license = "BSD-2-Clause"
+dependencies = [
+    "cryptography>=41.0",
+]
 classifiers = [
     "Programming Language :: Python :: 3",
 ]

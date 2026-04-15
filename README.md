@@ -6,8 +6,8 @@ and writes out the root KSK (Key Signing Key) as DNSKEY and DS
 records.
 
 It requires [Python](https://www.python.org/) 3.8+ and the
-[OpenSSL](https://www.openssl.org/) command line tool. There are no
-other dependencies.
+[cryptography](https://cryptography.io/) library (installed
+automatically via pip).
 
 ## How it works
 

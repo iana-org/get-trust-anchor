@@ -4,11 +4,14 @@ import datetime
 import os
 import subprocess
 import sys
-from unittest import mock
 
 import pytest
 
 from get_trust_anchor.cli import (
+    _der_read,
+    _der_elements,
+    _der_encode_length,
+    _extract_pkcs7_signer_info,
     bytes_to_string,
     dnskey_to_hex_of_hash,
     extract_ksks_from_trust_anchors,
@@ -16,6 +19,7 @@ from get_trust_anchor.cli import (
     get_matching_ksk,
     get_valid_trust_anchors,
     export_ksk,
+    validate_detached_signature,
     write_out_file,
 )
 
@@ -310,3 +314,176 @@ class TestCLI:
             assert f.read() == expected_dnskey
         with open(str(tmp_dir / "ksk-as-ds.txt")) as f:
             assert f.read() == expected_ds
+
+
+# --- DER parsing ---
+
+class TestDerRead:
+    def test_short_length(self):
+        # OCTET STRING, length 3, value 0x01 0x02 0x03
+        data = bytes([0x04, 0x03, 0x01, 0x02, 0x03])
+        tag, value, next_offset = _der_read(data, 0)
+        assert tag == 0x04
+        assert value == bytes([0x01, 0x02, 0x03])
+        assert next_offset == 5
+
+    def test_long_length(self):
+        # OCTET STRING, length 200 (0x81 0xc8)
+        payload = bytes(200)
+        data = bytes([0x04, 0x81, 0xc8]) + payload
+        tag, value, next_offset = _der_read(data, 0)
+        assert tag == 0x04
+        assert len(value) == 200
+        assert next_offset == 203
+
+    def test_two_byte_length(self):
+        # OCTET STRING, length 300 (0x82 0x01 0x2c)
+        payload = bytes(300)
+        data = bytes([0x04, 0x82, 0x01, 0x2c]) + payload
+        tag, value, next_offset = _der_read(data, 0)
+        assert tag == 0x04
+        assert len(value) == 300
+
+    def test_zero_length(self):
+        data = bytes([0x04, 0x00])
+        tag, value, next_offset = _der_read(data, 0)
+        assert tag == 0x04
+        assert value == b""
+        assert next_offset == 2
+
+
+class TestDerElements:
+    def test_sequence_of_integers(self):
+        # Two INTEGERs: 0x02 0x01 0x05 and 0x02 0x01 0x0a
+        body = bytes([0x02, 0x01, 0x05, 0x02, 0x01, 0x0a])
+        elements = list(_der_elements(body))
+        assert len(elements) == 2
+        assert elements[0] == (0x02, bytes([0x05]))
+        assert elements[1] == (0x02, bytes([0x0a]))
+
+
+class TestDerEncodeLength:
+    def test_short(self):
+        assert _der_encode_length(0) == bytes([0x00])
+        assert _der_encode_length(50) == bytes([50])
+        assert _der_encode_length(127) == bytes([127])
+
+    def test_long_one_byte(self):
+        assert _der_encode_length(128) == bytes([0x81, 128])
+        assert _der_encode_length(255) == bytes([0x81, 255])
+
+    def test_long_two_bytes(self):
+        assert _der_encode_length(256) == bytes([0x82, 0x01, 0x00])
+
+
+# --- PKCS7 signature verification ---
+
+class TestValidateDetachedSignature:
+    """Tests using a self-signed test CA and PKCS7 signature generated
+    with the cryptography library."""
+
+    @pytest.fixture
+    def test_pkcs7(self):
+        """Generate a test CA, signer cert, and PKCS7 detached signature."""
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.primitives.serialization import pkcs7 as pkcs7_builder
+        import datetime as dt
+
+        # Generate CA key and self-signed cert
+        ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        ca_name = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "Test CA")])
+        ca_cert = (
+            x509.CertificateBuilder()
+            .subject_name(ca_name)
+            .issuer_name(ca_name)
+            .public_key(ca_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc))
+            .not_valid_after(dt.datetime(2030, 1, 1, tzinfo=dt.timezone.utc))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+            .sign(ca_key, hashes.SHA256())
+        )
+
+        # Generate signer key and cert signed by CA
+        signer_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        signer_name = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "Test Signer")])
+        signer_cert = (
+            x509.CertificateBuilder()
+            .subject_name(signer_name)
+            .issuer_name(ca_name)
+            .public_key(signer_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc))
+            .not_valid_after(dt.datetime(2030, 1, 1, tzinfo=dt.timezone.utc))
+            .sign(ca_key, hashes.SHA256())
+        )
+
+        # Create PKCS7 detached signature over test content
+        content = b"test content to be signed"
+        signature_der = (
+            pkcs7_builder.PKCS7SignatureBuilder()
+            .set_data(content)
+            .add_signer(signer_cert, signer_key, hashes.SHA256())
+            .sign(serialization.Encoding.DER, [pkcs7_builder.PKCS7Options.DetachedSignature])
+        )
+
+        ca_pem = ca_cert.public_bytes(serialization.Encoding.PEM).decode()
+
+        return content, signature_der, ca_pem
+
+    def test_valid_signature(self, test_pkcs7):
+        content, signature_der, ca_pem = test_pkcs7
+        # Should not raise
+        validate_detached_signature(content, signature_der, ca_pem)
+
+    def test_tampered_content(self, test_pkcs7):
+        content, signature_der, ca_pem = test_pkcs7
+        with pytest.raises(SystemExit):
+            validate_detached_signature(b"tampered content", signature_der, ca_pem)
+
+    def test_wrong_ca(self, test_pkcs7):
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        import datetime as dt
+
+        content, signature_der, _ = test_pkcs7
+
+        # Generate a different CA
+        other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        other_name = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "Other CA")])
+        other_cert = (
+            x509.CertificateBuilder()
+            .subject_name(other_name)
+            .issuer_name(other_name)
+            .public_key(other_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc))
+            .not_valid_after(dt.datetime(2030, 1, 1, tzinfo=dt.timezone.utc))
+            .sign(other_key, hashes.SHA256())
+        )
+        other_pem = other_cert.public_bytes(serialization.Encoding.PEM).decode()
+
+        with pytest.raises(SystemExit):
+            validate_detached_signature(content, signature_der, other_pem)
+
+    def test_string_content(self, test_pkcs7):
+        """Verify that str content is handled (encoded to bytes)."""
+        content, signature_der, ca_pem = test_pkcs7
+        # The original content was bytes; passing as str should fail since
+        # the bytes differ, confirming str->bytes encoding is happening
+        with pytest.raises(SystemExit):
+            validate_detached_signature("tampered", signature_der, ca_pem)
+
+    def test_pkcs7_structure_parsing(self, test_pkcs7):
+        """Verify the DER parser extracts expected fields from a real PKCS7."""
+        _, signature_der, _ = test_pkcs7
+        info = _extract_pkcs7_signer_info(signature_der)
+        assert 'digest_algorithm' in info
+        assert 'auth_attrs_value' in info
+        assert 'message_digest' in info
+        assert 'signature' in info
+        assert len(info['signature']) > 0
+        assert len(info['message_digest']) == 32  # SHA-256 digest

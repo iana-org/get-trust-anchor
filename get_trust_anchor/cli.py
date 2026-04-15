@@ -58,12 +58,17 @@ import os
 import pprint
 import re
 import struct
-import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree
 from io import StringIO
 from urllib.request import urlopen
+
+from cryptography import x509
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.serialization.pkcs7 import load_der_pkcs7_certificates
 
 ICANN_ROOT_CA_CERT = '''
 -----BEGIN CERTIFICATE-----
@@ -219,20 +224,193 @@ def fetch_ksk_from_zonefile():
     return ksks
 
 
-def validate_detached_signature(contents_filename, signature_filename, ca_filename):
-    """Takes the name of the contents file, the signature file, and CA file;
-        returns nothing if sucessful or dies if openssl returns an error."""
-    # Run openssl to validate the signature
-    validate_command = "openssl smime -verify -CAfile {ca} -inform der -in {sig} -content {cont}"
-    validate_popen = subprocess.Popen(validate_command.format(\
-        ca=ca_filename, sig=signature_filename, cont=contents_filename),\
-        shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    (validate_out, validate_err) = validate_popen.communicate()
-    if validate_popen.returncode != 0:
-        die("When running openssl, the return code was {} ".format(validate_popen.returncode),\
-            "and the output was the following.\n{} {}".format(validate_err, validate_out))
+def _der_read(data, offset):
+    """Read a DER TLV at offset. Returns (tag, value_bytes, next_offset)."""
+    tag = data[offset]
+    offset += 1
+    length_byte = data[offset]
+    offset += 1
+    if length_byte < 0x80:
+        length = length_byte
     else:
-        print("Validation of the signature over the file succeeded.")
+        num_bytes = length_byte & 0x7f
+        length = int.from_bytes(data[offset:offset + num_bytes], 'big')
+        offset += num_bytes
+    return tag, data[offset:offset + length], offset + length
+
+
+def _der_elements(data):
+    """Yield (tag, value) for each TLV element in a DER SEQUENCE/SET body."""
+    offset = 0
+    while offset < len(data):
+        tag, value, offset = _der_read(data, offset)
+        yield tag, value
+
+
+def _der_encode_length(length):
+    """Encode a length value in DER format."""
+    if length < 0x80:
+        return bytes([length])
+    length_bytes = length.to_bytes((length.bit_length() + 7) // 8, 'big')
+    return bytes([0x80 | len(length_bytes)]) + length_bytes
+
+
+# OID for messageDigest attribute (1.2.840.113549.1.9.4)
+_OID_MESSAGE_DIGEST = b'\x2a\x86\x48\x86\xf7\x0d\x01\x09\x04'
+
+# Digest algorithm OIDs to cryptography hash classes
+_DIGEST_ALGORITHMS = {
+    b'\x60\x86\x48\x01\x65\x03\x04\x02\x01': hashes.SHA256,  # 2.16.840.1.101.3.4.2.1
+    b'\x2b\x0e\x03\x02\x1a': hashes.SHA1,  # 1.3.14.3.2.26
+}
+
+
+def _extract_pkcs7_signer_info(der_data):
+    """Parse a DER-encoded PKCS7 SignedData and extract the first SignerInfo.
+
+    Returns a dict with keys: digest_algorithm, auth_attrs_value,
+    message_digest, signature."""
+    # ContentInfo SEQUENCE -> find [0] EXPLICIT containing SignedData
+    _, ci_body, _ = _der_read(der_data, 0)
+    signed_data_wrapper = None
+    for tag, value in _der_elements(ci_body):
+        if tag == 0xa0:
+            signed_data_wrapper = value
+            break
+    if signed_data_wrapper is None:
+        raise ValueError("No SignedData found in PKCS7")
+
+    # SignedData SEQUENCE -> find signerInfos (last SET)
+    _, sd_body, _ = _der_read(signed_data_wrapper, 0)
+    last_set = None
+    for tag, value in _der_elements(sd_body):
+        if tag == 0x31:  # SET (first is digestAlgorithms, last is signerInfos)
+            last_set = value
+    if last_set is None:
+        raise ValueError("No signerInfos found")
+
+    # First SignerInfo SEQUENCE
+    _, si_body, _ = _der_read(last_set, 0)
+    si_elements = list(_der_elements(si_body))
+
+    result = {}
+
+    # digestAlgorithm is the second SEQUENCE (first is sid/issuerAndSerialNumber)
+    seq_count = 0
+    for tag, value in si_elements:
+        if tag == 0x30:
+            seq_count += 1
+            if seq_count == 2:  # digestAlgorithm
+                for oid_tag, oid_value in _der_elements(value):
+                    if oid_tag == 0x06:
+                        result['digest_algorithm'] = oid_value
+                        break
+                break
+
+    # [0] authenticatedAttributes and OCTET STRING signature
+    for tag, value in si_elements:
+        if tag == 0xa0:
+            result['auth_attrs_value'] = value
+            # Find messageDigest attribute inside the authenticated attributes
+            for attr_tag, attr_value in _der_elements(value):
+                if attr_tag != 0x30:
+                    continue
+                attr_parts = list(_der_elements(attr_value))
+                if len(attr_parts) >= 2 and attr_parts[0][1] == _OID_MESSAGE_DIGEST:
+                    # Value is in a SET containing an OCTET STRING
+                    for vt, vv in _der_elements(attr_parts[1][1]):
+                        if vt == 0x04:
+                            result['message_digest'] = vv
+                            break
+        elif tag == 0x04:
+            result['signature'] = value
+
+    return result
+
+
+def validate_detached_signature(content, signature_der, ca_pem):
+    """Verify a DER-encoded PKCS7 detached signature against a CA certificate.
+
+    Args:
+        content: the signed content (bytes or str)
+        signature_der: DER-encoded PKCS7 signature (bytes)
+        ca_pem: PEM-encoded CA certificate (str)
+    """
+    if isinstance(content, str):
+        content = content.encode()
+    if isinstance(ca_pem, str):
+        ca_pem = ca_pem.encode()
+
+    # Extract the signer certificate from the PKCS7 structure
+    certs = load_der_pkcs7_certificates(signature_der)
+    if not certs:
+        die("No certificates found in the signature file.")
+    signer_cert = certs[0]
+
+    # Verify the signer certificate was issued by the CA
+    ca_cert = x509.load_pem_x509_certificate(ca_pem)
+    try:
+        ca_cert.public_key().verify(
+            signer_cert.signature,
+            signer_cert.tbs_certificate_bytes,
+            padding.PKCS1v15(),
+            signer_cert.signature_hash_algorithm,
+        )
+    except InvalidSignature:
+        die("The signer certificate was not issued by the trusted CA.")
+
+    # Parse PKCS7 to extract signature verification data
+    try:
+        signer_info = _extract_pkcs7_signer_info(signature_der)
+    except (ValueError, IndexError, KeyError) as exc:
+        die("Failed to parse PKCS7 signature: {}".format(exc))
+
+    if 'signature' not in signer_info:
+        die("No signature found in PKCS7 signer info.")
+
+    # Determine the digest algorithm
+    alg_oid = signer_info.get('digest_algorithm')
+    hash_class = _DIGEST_ALGORITHMS.get(alg_oid)
+    if hash_class is None:
+        die("Unsupported digest algorithm in signature.")
+
+    if 'auth_attrs_value' in signer_info:
+        # Verify content digest matches the messageDigest attribute
+        content_digest = hashes.Hash(hash_class())
+        content_digest.update(content)
+        content_digest = content_digest.finalize()
+
+        if signer_info.get('message_digest') != content_digest:
+            die("Content digest does not match the messageDigest in the signature.")
+
+        # Per RFC 2315, the signature is over the DER encoding of the
+        # authenticated attributes re-tagged as a SET (0x31) rather than
+        # the implicit [0] (0xa0) used in the SignerInfo structure.
+        attrs = signer_info['auth_attrs_value']
+        attrs_der = bytes([0x31]) + _der_encode_length(len(attrs)) + attrs
+
+        try:
+            signer_cert.public_key().verify(
+                signer_info['signature'],
+                attrs_der,
+                padding.PKCS1v15(),
+                hash_class(),
+            )
+        except InvalidSignature:
+            die("PKCS7 signature verification failed.")
+    else:
+        # No authenticated attributes; verify signature directly over content
+        try:
+            signer_cert.public_key().verify(
+                signer_info['signature'],
+                content,
+                padding.PKCS1v15(),
+                hash_class(),
+            )
+        except InvalidSignature:
+            die("PKCS7 signature verification failed.")
+
+    print("Validation of the signature over the file succeeded.")
 
 
 def extract_trust_anchors_from_xml(trust_anchor_xml):
@@ -413,11 +591,6 @@ def main():
         help="Keep the temporary files (the XML and validating signature")
     opts = cmd_parse.parse_args()
 
-    # Make sure there is an "openssl" command in their shell path
-    which_return = subprocess.call("which openssl", shell=True, stdout=subprocess.PIPE)
-    if which_return != 0:
-        die("Could not find the 'openssl' command on this system.")
-
     ### Step 1. Fetch the trust anchor file from IANA using HTTPS
     if opts.local:
         if not os.path.exists(opts.local):
@@ -427,7 +600,7 @@ def main():
         except:
             die("Could not read from file {}.".format(opts.local))
     else:
-        # Get the trust anchor file from its URL, write it to disk
+        # Get the trust anchor file from its URL
         try:
             trust_anchor_url = urlopen(URL_ROOT_ANCHORS)
         except Exception as this_exception:
@@ -438,12 +611,12 @@ def main():
     write_out_file(trust_anchor_filename, trust_anchor_xml)
 
     ### Step 2. Fetch the S/MIME signature for the trust anchor file from
-    ### IANA using HTTPS. Get the signature file from its URL, write it to disk.
+    ### IANA using HTTPS.
+    signature_contents = None
     if opts.local_sig:
-        if not os.path.exists(opts.local):
+        if not os.path.exists(opts.local_sig):
             die("Could not find file {}.".format(opts.local_sig))
         try:
-            signature_filename = opts.local_sig
             signature_contents = open(opts.local_sig, mode="rb").read()
         except:
             die("Could not read from file {}.".format(opts.local_sig))
@@ -461,16 +634,16 @@ def main():
                 URL_ROOT_ANCHORS_SIGNATURE, this_exception))
 
     ### Step 3. Validate the signature on the trust anchor file using a
-    ### built-in IANA CA key. Skip this step if using a local file.
-    if opts.root_ca:
-        icann_ca_filename = opts.root_ca
-    else:
-        (_, icann_ca_filename) = tempfile.mkstemp(prefix="icann_ca_")
-        temp_files.append(icann_ca_filename)
-        write_out_file(icann_ca_filename, ICANN_ROOT_CA_CERT)
-
-    if opts.no_validation is not True:
-        validate_detached_signature(trust_anchor_filename, signature_filename, icann_ca_filename)
+    ### built-in IANA CA key.
+    if not opts.no_validation:
+        if opts.root_ca:
+            try:
+                ca_pem = open(opts.root_ca, mode="rt").read()
+            except:
+                die("Could not read CA file {}.".format(opts.root_ca))
+        else:
+            ca_pem = ICANN_ROOT_CA_CERT
+        validate_detached_signature(trust_anchor_xml, signature_contents, ca_pem)
     else:
         print("Not validating the local trust anchor file.")
 
