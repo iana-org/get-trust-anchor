@@ -50,7 +50,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import codecs
 import datetime
 import hashlib
 import json
@@ -62,7 +61,6 @@ import sys
 import tempfile
 import xml.etree.ElementTree
 from collections.abc import Generator
-from io import StringIO
 from typing import Any, NoReturn
 from urllib.request import urlopen
 
@@ -123,9 +121,8 @@ def bytes_to_string(byte_array: bytes | str) -> str:
     """Convert bytes that are in ASCII into strings.
     This is used for content received over URLs."""
     if isinstance(byte_array, str):
-        return str(byte_array)
-    ascii_codec = codecs.lookup("ascii")
-    return ascii_codec.decode(byte_array)[0]
+        return byte_array
+    return byte_array.decode("ascii")
 
 
 def write_out_file(file_name: str, file_contents: str | bytes) -> None:
@@ -142,22 +139,18 @@ def write_out_file(file_name: str, file_contents: str | bytes) -> None:
     # Pick the mode string based on the type of contents
     filemode = "wt" if isinstance(file_contents, str) else "wb"
     try:
-        fobj = open(file_name, mode=filemode)
-        fobj.write(file_contents)
-        fobj.close()
+        with open(file_name, mode=filemode) as fobj:
+            fobj.write(file_contents)
     except:
         die(f"Could not write out the file {file_name}.")
-    return
 
 
 def dnskey_to_hex_of_hash(dnskey_dict: KskDict, hash_type: str) -> str:
     """Takes a DNSKEY dict and hash type (string), and returns the hex of the hash as a string"""
-    if hash_type == "1":
-        this_hash = hashlib.sha1()
-    elif hash_type == "2":
-        this_hash = hashlib.sha256()
-    else:
+    hash_funcs = {"1": hashlib.sha1, "2": hashlib.sha256}
+    if hash_type not in hash_funcs:
         die(f"A DNSKEY dict had a hash type of {hash_type}, which is unknown.")
+    this_hash = hash_funcs[hash_type]()
     digest_content = bytearray()
     digest_content.append(0)  # Name of the zone, expressed in wire format
     digest_content.extend(
@@ -449,10 +442,10 @@ def extract_trust_anchors_from_xml(trust_anchor_xml: bytes | str) -> list[TrustA
     # Sanity check: make sure there is enough text in the returned stuff
     if len(trust_anchor_xml_string) < 100:
         die(f"The XML was too short: {len(trust_anchor_xml_string)} chars.")
-    # ElementTree requries a file so use StringIO to turn the string into a file
-    trust_anchor_as_file = StringIO(trust_anchor_xml_string)
     # Get the tree
-    trust_anchor_tree = xml.etree.ElementTree.ElementTree(file=trust_anchor_as_file)
+    trust_anchor_tree = xml.etree.ElementTree.ElementTree(
+        xml.etree.ElementTree.fromstring(trust_anchor_xml_string)  # noqa: S314
+    )
     # Get all the KeyDigest elements
     digest_elements = trust_anchor_tree.findall(".//KeyDigest")
     log(f"There were {len(digest_elements)} KeyDigest elements in the trust anchor file.")
@@ -472,10 +465,7 @@ def extract_trust_anchors_from_xml(trust_anchor_xml: bytes | str) -> list[TrustA
                 continue
             digest_value_dict[this_subelement] = value.text or ""
         for this_attribute in ["validFrom", "validUntil"]:
-            if this_attribute in this_digest_element.keys():  # noqa: SIM118
-                digest_value_dict[this_attribute] = this_digest_element.attrib[this_attribute]
-            else:
-                digest_value_dict[this_attribute] = ""  # Missing attributes get empty values
+            digest_value_dict[this_attribute] = this_digest_element.get(this_attribute, "")
         # Save this to the global trust_anchors list
         log(f"Added the trust anchor {count} to the list:\n{pprint.pformat(digest_value_dict)}")
         trust_anchors.append(digest_value_dict)
@@ -497,10 +487,7 @@ def get_valid_trust_anchors(trust_anchors: list[TrustAnchorDict]) -> list[TrustA
                 "so not using this trust anchor.",
             )
             continue
-        digest_element_valid_from = this_anchor["validFrom"]
-        (from_left, _) = digest_element_valid_from.split("T", 2)
-        (from_year, from_month, from_day) = from_left.split("-")
-        from_date_time = datetime.datetime(int(from_year), int(from_month), int(from_day))
+        from_date_time = datetime.datetime.fromisoformat(this_anchor["validFrom"].split("T", 2)[0])
         if now_datetime < from_date_time:
             log(
                 f"Trust anchor {count}: the validFrom '{from_date_time}' is later",
@@ -514,19 +501,17 @@ def get_valid_trust_anchors(trust_anchors: list[TrustAnchorDict]) -> list[TrustA
             )
             valid_trust_anchors.append(this_anchor)
         else:
-            digest_element_valid_until = this_anchor["validUntil"]
-            (until_left, _) = digest_element_valid_until.split("T", 2)
-            (until_year, until_month, until_day) = until_left.split("-")
-            until_date_time = datetime.datetime(int(until_year), int(until_month), int(until_day))
+            until_date_time = datetime.datetime.fromisoformat(
+                this_anchor["validUntil"].split("T", 2)[0]
+            )
             if now_datetime > until_date_time:
                 log(
                     f"Trust anchor {count}: the validUntil '{until_date_time}'"
                     " is before today, so not using this trust anchor."
                 )
                 continue
-            else:
-                log(f"Trust anchor {count}: the validity period passes.")
-                valid_trust_anchors.append(this_anchor)
+            log(f"Trust anchor {count}: the validity period passes.")
+            valid_trust_anchors.append(this_anchor)
     if len(valid_trust_anchors) == 0:
         die("After checking validity dates, there were no trust anchors left.")
     log(f"After the date validity checks, there are now {len(valid_trust_anchors)} records.")
@@ -554,8 +539,7 @@ def get_matching_ksk(
                 break  # Don't check more trust anchors against this KSK
     if len(matched_ksks) == 0:
         die("After checking for trust anchor matches, there were no trusted KSKs.")
-    else:
-        log(f"There were {len(matched_ksks)} matched KSKs.")
+    log(f"There were {len(matched_ksks)} matched KSKs.")
     return matched_ksks
 
 
@@ -566,11 +550,9 @@ def format_records(valid_ksks: list[KskDict]) -> tuple[str, str]:
 
     for this_matched_ksk in valid_ksks:
         # Format the DNSKEY
-        dnskey_record_contents += ". IN DNSKEY {flags} {proto} {alg} {keyas64}\n".format(
-            flags=this_matched_ksk["f"],
-            proto=this_matched_ksk["p"],
-            alg=this_matched_ksk["a"],
-            keyas64=this_matched_ksk["k"],
+        dnskey_record_contents += (
+            f". IN DNSKEY {this_matched_ksk['f']} {this_matched_ksk['p']}"
+            f" {this_matched_ksk['a']} {this_matched_ksk['k']}\n"
         )
         # Format the DS
         hash_as_hex = dnskey_to_hex_of_hash(this_matched_ksk, "2")  # Always do SHA256
@@ -594,9 +576,7 @@ def format_records(valid_ksks: list[KskDict]) -> tuple[str, str]:
                 accumulator += this_byte
         this_key_tag = ((accumulator & 0xFFFF) + (accumulator >> 16)) & 0xFFFF
         log(f"The key tag for this KSK is {this_key_tag}")
-        ds_record_contents += ". IN DS {keytag} {alg} 2 {sha256ofkey}\n".format(
-            keytag=this_key_tag, alg=this_matched_ksk["a"], sha256ofkey=hash_as_hex
-        )
+        ds_record_contents += f". IN DS {this_key_tag} {this_matched_ksk['a']} 2 {hash_as_hex}\n"
 
     return dnskey_record_contents, ds_record_contents
 
@@ -748,15 +728,8 @@ def main() -> int:
     else:
         ksk_records = fetch_ksk()
     for key in ksk_records:
-        log(
-            "Found KSK {flags} {proto} {alg} '{keystart}...{keyend}'.".format(
-                flags=key["f"],
-                proto=key["p"],
-                alg=key["a"],
-                keystart=str(key["k"])[0:15],
-                keyend=str(key["k"])[-15:],
-            )
-        )
+        key_str = str(key["k"])
+        log(f"Found KSK {key['f']} {key['p']} {key['a']} '{key_str[:15]}...{key_str[-15:]}'.")
     # Go trough all the KSKs, decoding them and comparing them to all the trust anchors
     matched_ksks = get_matching_ksk(ksk_records, valid_trust_anchors)
 
@@ -771,7 +744,7 @@ def main() -> int:
         export_ksk(matched_ksks, ds_record_filename, dnskey_record_filename)
     # Delete the temporary files unless requested not to
     if opts.keep:
-        log("Kept the temporary files: {}".format(" ".join(temp_files)))
+        log(f"Kept the temporary files: {' '.join(temp_files)}")
     else:
         log("Deleting the temporary files.")
         for this_file in temp_files:

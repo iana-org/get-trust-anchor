@@ -83,11 +83,6 @@ Check formatting, lint, and types:
     ruff check .
     ty check
 
-## Root zone trust anchors
-
-- https://www.iana.org/dnssec
-- https://data.iana.org/root-anchors/root-anchors.xml
-
 ## License
 
-BSD 2-Clause. See [LICENSE](LICENSE) for details.
+BSD 2-Clause. See [LICENSE](LICENSE.md) for details.
