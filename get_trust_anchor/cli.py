@@ -65,6 +65,7 @@ from typing import Any, NoReturn
 from urllib.request import urlopen
 
 from cryptography import x509
+from cryptography.x509 import load_pem_x509_certificates
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -343,33 +344,15 @@ def _extract_pkcs7_signer_info(der_data: bytes) -> SignerInfoDict:
     return result
 
 
-def _parse_pem_bundle(pem: str | bytes) -> list[bytes]:
-    """Split a PEM bundle into a list of individual PEM-encoded certificate byte strings."""
-    if isinstance(pem, bytes):
-        pem = pem.decode("ascii")
-    certs = []
-    current: list[str] = []
-    for line in pem.splitlines():
-        if line.startswith("-----BEGIN CERTIFICATE-----"):
-            current = [line]
-        elif line.startswith("-----END CERTIFICATE-----"):
-            current.append(line)
-            certs.append("\n".join(current).encode())
-            current = []
-        elif current:
-            current.append(line)
-    return certs
-
-
 def validate_detached_signature(
-    content: bytes | str, signature_der: bytes, ca_pems: list[bytes]
+    content: bytes | str, signature_der: bytes, ca_certs: list[x509.Certificate]
 ) -> None:
     """Verify a DER-encoded PKCS7 detached signature against a list of CA certificates.
 
     Args:
         content: the signed content (bytes or str)
         signature_der: DER-encoded PKCS7 signature (bytes)
-        ca_pems: list of PEM-encoded CA certificates to try (bytes)
+        ca_certs: list of CA certificates to try
     """
     if isinstance(content, str):
         content = content.encode()
@@ -404,8 +387,7 @@ def validate_detached_signature(
         if current.signature_hash_algorithm is None:
             die("A certificate in the chain has no signature hash algorithm.")
         # Check whether any trusted CA signed the current cert
-        for ca_pem in ca_pems:
-            ca_cert = x509.load_pem_x509_certificate(ca_pem)
+        for ca_cert in ca_certs:
             if current.issuer != ca_cert.subject:
                 continue
             ca_public_key = ca_cert.public_key()
@@ -773,10 +755,11 @@ def main() -> int:
                 die(f"Could not read CA file {opts.root_ca}.")
         else:
             ca_pem_text = ICANN_ROOT_CA_CERT
-        ca_pems = _parse_pem_bundle(ca_pem_text)
-        if not ca_pems:
+        ca_pem_bytes = ca_pem_text.encode() if isinstance(ca_pem_text, str) else ca_pem_text
+        ca_certs = list(load_pem_x509_certificates(ca_pem_bytes))
+        if not ca_certs:
             die(f"No CA certificates found in {opts.root_ca or 'built-in CA'}.")
-        validate_detached_signature(trust_anchor_xml, signature_contents, ca_pems)
+        validate_detached_signature(trust_anchor_xml, signature_contents, ca_certs)
     else:
         log("Not validating the local trust anchor file.")
 
