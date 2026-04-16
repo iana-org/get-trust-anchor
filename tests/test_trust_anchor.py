@@ -5,6 +5,7 @@ import subprocess
 import sys
 
 import pytest
+from cryptography.x509 import load_pem_x509_certificates
 
 from get_trust_anchor.cli import (
     _der_elements,
@@ -539,13 +540,15 @@ class TestValidateDetachedSignature:
 
     def test_valid_signature(self, test_pkcs7):
         content, signature_der, ca_pem = test_pkcs7
+        ca_certs = list(load_pem_x509_certificates(ca_pem.encode()))
         # Should not raise
-        validate_detached_signature(content, signature_der, ca_pem)
+        validate_detached_signature(content, signature_der, ca_certs)
 
     def test_tampered_content(self, test_pkcs7):
         content, signature_der, ca_pem = test_pkcs7
+        ca_certs = list(load_pem_x509_certificates(ca_pem.encode()))
         with pytest.raises(SystemExit):
-            validate_detached_signature(b"tampered content", signature_der, ca_pem)
+            validate_detached_signature(b"tampered content", signature_der, ca_certs)
 
     def test_wrong_ca(self, test_pkcs7):
         import datetime as dt
@@ -569,18 +572,20 @@ class TestValidateDetachedSignature:
             .not_valid_after(dt.datetime(2030, 1, 1, tzinfo=dt.timezone.utc))
             .sign(other_key, hashes.SHA256())
         )
-        other_pem = other_cert.public_bytes(serialization.Encoding.PEM).decode()
+        other_pem = other_cert.public_bytes(serialization.Encoding.PEM)
+        ca_certs = list(load_pem_x509_certificates(other_pem))
 
         with pytest.raises(SystemExit):
-            validate_detached_signature(content, signature_der, other_pem)
+            validate_detached_signature(content, signature_der, ca_certs)
 
     def test_string_content(self, test_pkcs7):
         """Verify that str content is handled (encoded to bytes)."""
-        content, signature_der, ca_pem = test_pkcs7
+        _, signature_der, ca_pem = test_pkcs7
+        ca_certs = list(load_pem_x509_certificates(ca_pem.encode()))
         # The original content was bytes; passing as str should fail since
         # the bytes differ, confirming str->bytes encoding is happening
         with pytest.raises(SystemExit):
-            validate_detached_signature("tampered", signature_der, ca_pem)
+            validate_detached_signature("tampered", signature_der, ca_certs)
 
     def test_pkcs7_structure_parsing(self, test_pkcs7):
         """Verify the DER parser extracts expected fields from a real PKCS7."""
