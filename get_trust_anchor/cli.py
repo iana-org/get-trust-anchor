@@ -65,12 +65,12 @@ from typing import Any, NoReturn
 from urllib.request import urlopen
 
 from cryptography import x509
-from cryptography.x509 import load_pem_x509_certificates
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from cryptography.hazmat.primitives.serialization.pkcs7 import load_der_pkcs7_certificates
+from cryptography.x509 import load_pem_x509_certificates
 
 # Type aliases
 KskDict = dict[str, str | int]
