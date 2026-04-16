@@ -306,12 +306,16 @@ def _extract_pkcs7_signer_info(der_data: bytes) -> SignerInfoDict:
 
     result: SignerInfoDict = {}
 
-    # digestAlgorithm is the second SEQUENCE (first is sid/issuerAndSerialNumber)
+    # Parse issuerAndSerialNumber (first SEQUENCE) and digestAlgorithm (second SEQUENCE)
     seq_count = 0
     for tag, value in si_elements:
         if tag == 0x30:
             seq_count += 1
-            if seq_count == 2:  # digestAlgorithm
+            if seq_count == 1:  # issuerAndSerialNumber: SEQUENCE { Name, INTEGER }
+                for sub_tag, sub_value in _der_elements(value):
+                    if sub_tag == 0x02:  # INTEGER = serialNumber
+                        result["signer_serial"] = sub_value
+            elif seq_count == 2:  # digestAlgorithm
                 for oid_tag, oid_value in _der_elements(value):
                     if oid_tag == 0x06:
                         result["digest_algorithm"] = oid_value
@@ -339,49 +343,107 @@ def _extract_pkcs7_signer_info(der_data: bytes) -> SignerInfoDict:
     return result
 
 
+def _parse_pem_bundle(pem: str | bytes) -> list[bytes]:
+    """Split a PEM bundle into a list of individual PEM-encoded certificate byte strings."""
+    if isinstance(pem, bytes):
+        pem = pem.decode("ascii")
+    certs = []
+    current: list[str] = []
+    for line in pem.splitlines():
+        if line.startswith("-----BEGIN CERTIFICATE-----"):
+            current = [line]
+        elif line.startswith("-----END CERTIFICATE-----"):
+            current.append(line)
+            certs.append("\n".join(current).encode())
+            current = []
+        elif current:
+            current.append(line)
+    return certs
+
+
 def validate_detached_signature(
-    content: bytes | str, signature_der: bytes, ca_pem: str | bytes
+    content: bytes | str, signature_der: bytes, ca_pems: list[bytes]
 ) -> None:
-    """Verify a DER-encoded PKCS7 detached signature against a CA certificate.
+    """Verify a DER-encoded PKCS7 detached signature against a list of CA certificates.
 
     Args:
         content: the signed content (bytes or str)
         signature_der: DER-encoded PKCS7 signature (bytes)
-        ca_pem: PEM-encoded CA certificate (str or bytes)
+        ca_pems: list of PEM-encoded CA certificates to try (bytes)
     """
     if isinstance(content, str):
         content = content.encode()
-    if isinstance(ca_pem, str):
-        ca_pem = ca_pem.encode()
 
-    # Extract the signer certificate from the PKCS7 structure
-    certs = load_der_pkcs7_certificates(signature_der)
-    if not certs:
-        die("No certificates found in the signature file.")
-    signer_cert = certs[0]
-
-    # Verify the signer certificate was issued by the CA (ICANN uses RSA)
-    ca_cert = x509.load_pem_x509_certificate(ca_pem)
-    ca_public_key = ca_cert.public_key()
-    if not isinstance(ca_public_key, RSAPublicKey):
-        die("Expected RSA public key in CA certificate.")
-    if signer_cert.signature_hash_algorithm is None:
-        die("Signer certificate has no signature hash algorithm.")
-    try:
-        ca_public_key.verify(
-            signer_cert.signature,
-            signer_cert.tbs_certificate_bytes,
-            padding.PKCS1v15(),
-            signer_cert.signature_hash_algorithm,
-        )
-    except InvalidSignature:
-        die("The signer certificate was not issued by the trusted CA.")
-
-    # Parse PKCS7 to extract signature verification data
+    # Parse PKCS7 first — we need the signer's serial number to identify the cert
     try:
         signer_info = _extract_pkcs7_signer_info(signature_der)
     except (ValueError, IndexError, KeyError) as exc:
         die(f"Failed to parse PKCS7 signature: {exc}")
+
+    # Extract all certificates bundled in the PKCS7 structure
+    certs = load_der_pkcs7_certificates(signature_der)
+    if not certs:
+        die("No certificates found in the signature file.")
+
+    # Identify the signer cert via IssuerAndSerialNumber from SignerInfo (RFC 2315 §9.2).
+    # This is unambiguous regardless of chain length or cert ordering in the bundle.
+    signer_serial_bytes = signer_info.get("signer_serial")
+    if signer_serial_bytes is None:
+        die("Could not determine signer serial number from PKCS7 structure.")
+    signer_serial = int.from_bytes(signer_serial_bytes, "big")
+    signer_cert = next((c for c in certs if c.serial_number == signer_serial), None)
+    if signer_cert is None:
+        die("Could not find the signer certificate in the signature file.")
+
+    # Walk the certificate chain from the signer cert up to a trusted CA.
+    # The P7S bundle may contain intermediates; we verify each link as we ascend.
+    bundle_by_subject = {cert.subject: cert for cert in certs}
+    current = signer_cert
+    chain_verified = False
+    for _ in range(10):  # guard against cycles or unreasonably deep chains
+        if current.signature_hash_algorithm is None:
+            die("A certificate in the chain has no signature hash algorithm.")
+        # Check whether any trusted CA signed the current cert
+        for ca_pem in ca_pems:
+            ca_cert = x509.load_pem_x509_certificate(ca_pem)
+            if current.issuer != ca_cert.subject:
+                continue
+            ca_public_key = ca_cert.public_key()
+            if not isinstance(ca_public_key, RSAPublicKey):
+                continue
+            try:
+                ca_public_key.verify(
+                    current.signature,
+                    current.tbs_certificate_bytes,
+                    padding.PKCS1v15(),
+                    current.signature_hash_algorithm,
+                )
+                chain_verified = True
+            except InvalidSignature:
+                pass
+            break  # matched by subject; no need to try other CAs
+        if chain_verified:
+            break
+        # Not yet at a trusted CA — look for the issuer among the bundle certs
+        issuer_cert = bundle_by_subject.get(current.issuer)
+        if issuer_cert is None:
+            break  # chain is broken
+        # Verify this link before ascending
+        issuer_key = issuer_cert.public_key()
+        if not isinstance(issuer_key, RSAPublicKey):
+            break
+        try:
+            issuer_key.verify(
+                current.signature,
+                current.tbs_certificate_bytes,
+                padding.PKCS1v15(),
+                current.signature_hash_algorithm,
+            )
+        except InvalidSignature:
+            break  # link is invalid
+        current = issuer_cert
+    if not chain_verified:
+        die("The signer certificate chain could not be verified against any trusted CA.")
 
     if "signature" not in signer_info:
         die("No signature found in PKCS7 signer info.")
@@ -706,12 +768,15 @@ def main() -> int:
     if not opts.no_validation:
         if opts.root_ca:
             try:
-                ca_pem = open(opts.root_ca).read()
+                ca_pem_text = open(opts.root_ca).read()
             except:
                 die(f"Could not read CA file {opts.root_ca}.")
         else:
-            ca_pem = ICANN_ROOT_CA_CERT
-        validate_detached_signature(trust_anchor_xml, signature_contents, ca_pem)  # type: ignore[arg-type]
+            ca_pem_text = ICANN_ROOT_CA_CERT
+        ca_pems = _parse_pem_bundle(ca_pem_text)
+        if not ca_pems:
+            die(f"No CA certificates found in {opts.root_ca or 'built-in CA'}.")
+        validate_detached_signature(trust_anchor_xml, signature_contents, ca_pems)
     else:
         log("Not validating the local trust anchor file.")
 
