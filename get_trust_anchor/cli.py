@@ -682,7 +682,7 @@ def main() -> int:
         "--keep",
         dest="keep",
         action="store_true",
-        help="Keep the temporary files (the XML and validating signature",
+        help="Keep the temporary files (the XML and validating signature)",
     )
     cmd_parse.add_argument(
         "--print-dnskey",
