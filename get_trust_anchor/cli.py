@@ -369,12 +369,12 @@ def format_records(valid_ksks: list[KskDict]) -> tuple[str, str]:
     ds_record_contents = ""
 
     for this_matched_ksk in valid_ksks:
-        # Write out the DNSKEY
+        # Format the DNSKEY
         dnskey_record_contents += (
             f". IN DNSKEY {this_matched_ksk['f']} {this_matched_ksk['p']}"
             f" {this_matched_ksk['a']} {this_matched_ksk['k']}\n"
         )
-        # Write out the DS
+        # Format the DS
         hash_as_hex = dnskey_to_hex_of_hash(this_matched_ksk, "2")  # Always do SHA256
         # Calculate the keytag
         tag_base = bytearray()
@@ -488,7 +488,7 @@ def main() -> int:
         except:
             die(f"Could not read from file {opts.local}.")
     else:
-        # Get the trust anchor file from its URL, write it to disk
+        # Get the trust anchor file from its URL
         try:
             trust_anchor_url = urlopen(URL_ROOT_ANCHORS)
         except Exception as this_exception:
