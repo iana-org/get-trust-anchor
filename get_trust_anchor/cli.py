@@ -440,7 +440,7 @@ def main():
     ### Step 2. Fetch the S/MIME signature for the trust anchor file from
     ### IANA using HTTPS. Get the signature file from its URL, write it to disk.
     if opts.local_sig:
-        if not os.path.exists(opts.local):
+        if not os.path.exists(opts.local_sig):
             die("Could not find file {}.".format(opts.local_sig))
         try:
             signature_filename = opts.local_sig
