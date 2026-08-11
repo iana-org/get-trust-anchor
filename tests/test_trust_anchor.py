@@ -1,26 +1,24 @@
 """Tests for get_trust_anchor."""
 
-import datetime
 import os
 import subprocess
 import sys
-from unittest import mock
 
 import pytest
 
 from get_trust_anchor.cli import (
     bytes_to_string,
     dnskey_to_hex_of_hash,
+    export_ksk,
     extract_ksks_from_trust_anchors,
     extract_trust_anchors_from_xml,
     get_matching_ksk,
     get_valid_trust_anchors,
-    export_ksk,
     write_out_file,
 )
 
-
 # --- bytes_to_string ---
+
 
 class TestBytesToString:
     def test_pass_through_str(self):
@@ -37,6 +35,7 @@ class TestBytesToString:
 
 
 # --- dnskey_to_hex_of_hash ---
+
 
 class TestDnskeyToHexOfHash:
     def test_sha256_ksk_2017(self, ksk_2017):
@@ -59,6 +58,7 @@ class TestDnskeyToHexOfHash:
 
 
 # --- extract_trust_anchors_from_xml ---
+
 
 class TestExtractTrustAnchorsFromXml:
     def test_parses_all_digests(self, sample_xml):
@@ -108,11 +108,16 @@ class TestExtractTrustAnchorsFromXml:
 
 # --- get_valid_trust_anchors ---
 
+
 class TestGetValidTrustAnchors:
     def _make_anchor(self, valid_from, valid_until=""):
         return {
-            "KeyTag": "12345", "Algorithm": "8", "DigestType": "2",
-            "Digest": "AABB", "validFrom": valid_from, "validUntil": valid_until,
+            "KeyTag": "12345",
+            "Algorithm": "8",
+            "DigestType": "2",
+            "Digest": "AABB",
+            "validFrom": valid_from,
+            "validUntil": valid_until,
         }
 
     def test_current_anchor_passes(self):
@@ -159,6 +164,7 @@ class TestGetValidTrustAnchors:
 
 # --- extract_ksks_from_trust_anchors ---
 
+
 class TestExtractKsksFromTrustAnchors:
     def test_extracts_ksks(self, sample_xml_with_publickey):
         anchors = extract_trust_anchors_from_xml(sample_xml_with_publickey)
@@ -177,6 +183,7 @@ class TestExtractKsksFromTrustAnchors:
 
 
 # --- get_matching_ksk ---
+
 
 class TestGetMatchingKsk:
     def test_matching_ksk_found(self, ksk_2017):
@@ -209,6 +216,7 @@ class TestGetMatchingKsk:
 
 
 # --- export_ksk ---
+
 
 class TestExportKsk:
     def test_writes_dnskey_and_ds(self, tmp_dir, ksk_2017):
@@ -243,6 +251,7 @@ class TestExportKsk:
 
 # --- write_out_file ---
 
+
 class TestWriteOutFile:
     def test_writes_string(self, tmp_dir):
         write_out_file("test.txt", "hello world")
@@ -266,11 +275,13 @@ class TestWriteOutFile:
 
 # --- CLI integration ---
 
+
 class TestCLI:
     def test_help(self):
         result = subprocess.run(
             [sys.executable, "-m", "get_trust_anchor", "--help"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         assert result.returncode == 0
         assert "DNSSEC Trust Anchor Tool" in result.stdout
@@ -278,7 +289,8 @@ class TestCLI:
     def test_local_file_not_found(self, tmp_dir):
         result = subprocess.run(
             [sys.executable, "-m", "get_trust_anchor", "--local", "nonexistent.xml"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         assert result.returncode != 0
 
@@ -290,12 +302,19 @@ class TestCLI:
         with open(sig_path, "wb") as f:
             f.write(b"\x00")  # dummy signature; validation is disabled
         result = subprocess.run(
-            [sys.executable, "-m", "get_trust_anchor",
-             "--local", xml_path,
-             "--local-sig", sig_path,
-             "--no-validation",
-             "--ksks-from-trust-anchor"],
-            capture_output=True, text=True,
+            [
+                sys.executable,
+                "-m",
+                "get_trust_anchor",
+                "--local",
+                xml_path,
+                "--local-sig",
+                sig_path,
+                "--no-validation",
+                "--ksks-from-trust-anchor",
+            ],
+            capture_output=True,
+            text=True,
             cwd=str(tmp_dir),
         )
         assert result.returncode == 0, result.stderr
