@@ -175,7 +175,7 @@ class TestExtractKsksFromTrustAnchors:
             assert ksk["f"] == "257"
             assert ksk["p"] == 3
             assert ksk["a"] == "8"
-            assert len(ksk["k"]) > 0
+            assert len(str(ksk["k"])) > 0
 
     def test_skips_anchors_without_publickey(self, sample_xml):
         anchors = extract_trust_anchors_from_xml(sample_xml)

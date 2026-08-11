@@ -5,7 +5,7 @@ This tool fetches the current DNSSEC root trust anchor from
 and writes out the root KSK (Key Signing Key) as DNSKEY and DS
 records.
 
-It requires [Python](https://www.python.org/) 3.8+ and the
+It requires [Python](https://www.python.org/) 3.10+ and the
 [OpenSSL](https://www.openssl.org/) command line tool. There are no
 other dependencies.
 
@@ -77,10 +77,11 @@ Run the tests:
 
     pytest
 
-Check formatting and lint:
+Check formatting, lint, and types:
 
     ruff format --check .
     ruff check .
+    ty check
 
 ## Root zone trust anchors
 
