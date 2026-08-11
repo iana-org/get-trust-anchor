@@ -52,13 +52,20 @@ Or invoke as a Python module:
 | `--no-validation` | Skip signature validation |
 | `--ksks-from-trust-anchor` | Extract KSKs directly from the trust anchor XML instead of fetching from DNS |
 | `--keep` | Keep temporary files (XML and signature) after running |
+| `--print-dnskey` | Print DNSKEY records to stdout instead of writing files |
+| `--print-ds` | Print DS records to stdout instead of writing files |
 
 ### Output
 
-The tool writes two files to the current directory:
+By default, the tool writes two files to the current directory:
 
 - `ksk-as-dnskey.txt` -- root KSKs as DNSKEY records
 - `ksk-as-ds.txt` -- root KSKs as DS records
+
+Use `--print-dnskey` or `--print-ds` to print records to stdout
+instead, suitable for piping:
+
+    get-trust-anchor --print-ds | grep "^. IN DS"
 
 ## Development
 

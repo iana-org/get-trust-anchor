@@ -12,6 +12,7 @@ from get_trust_anchor.cli import (
     export_ksk,
     extract_ksks_from_trust_anchors,
     extract_trust_anchors_from_xml,
+    format_records,
     get_matching_ksk,
     get_valid_trust_anchors,
     write_out_file,
@@ -249,6 +250,21 @@ class TestExportKsk:
         assert len(lines) == 2
 
 
+# --- format_records ---
+
+
+class TestFormatRecords:
+    def test_returns_dnskey_and_ds(self, ksk_2017):
+        dnskey, ds = format_records([ksk_2017])
+        assert dnskey.startswith(". IN DNSKEY 257 3 8 ")
+        assert ". IN DS 20326 8 2 " in ds
+
+    def test_multiple_ksks(self, ksk_2017, ksk_2024):
+        dnskey, ds = format_records([ksk_2017, ksk_2024])
+        assert len(dnskey.strip().split("\n")) == 2
+        assert len(ds.strip().split("\n")) == 2
+
+
 # --- write_out_file ---
 
 
@@ -329,3 +345,68 @@ class TestCLI:
             assert f.read() == expected_dnskey
         with open(str(tmp_dir / "ksk-as-ds.txt")) as f:
             assert f.read() == expected_ds
+
+    def _run_local(self, tmp_dir, sample_xml_with_publickey, extra_args):
+        """Helper to run with local fixtures and extra CLI args."""
+        xml_path = str(tmp_dir / "anchors.xml")
+        sig_path = str(tmp_dir / "anchors.p7s")
+        with open(xml_path, "w") as f:
+            f.write(sample_xml_with_publickey)
+        with open(sig_path, "wb") as f:
+            f.write(b"\x00")
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "get_trust_anchor",
+                "--local",
+                xml_path,
+                "--local-sig",
+                sig_path,
+                "--no-validation",
+                "--ksks-from-trust-anchor",
+                *extra_args,
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_dir),
+        )
+
+    def test_print_dnskey(self, tmp_dir, sample_xml_with_publickey):
+        result = self._run_local(tmp_dir, sample_xml_with_publickey, ["--print-dnskey"])
+        assert result.returncode == 0, result.stderr
+        assert ". IN DNSKEY 257 3 8 " in result.stdout
+        assert ". IN DS " not in result.stdout
+        # Should not write files when printing to stdout
+        assert not (tmp_dir / "ksk-as-dnskey.txt").exists()
+        assert not (tmp_dir / "ksk-as-ds.txt").exists()
+
+    def test_print_ds(self, tmp_dir, sample_xml_with_publickey):
+        result = self._run_local(tmp_dir, sample_xml_with_publickey, ["--print-ds"])
+        assert result.returncode == 0, result.stderr
+        assert ". IN DS " in result.stdout
+        assert ". IN DNSKEY " not in result.stdout
+        assert not (tmp_dir / "ksk-as-dnskey.txt").exists()
+
+    def test_print_both(self, tmp_dir, sample_xml_with_publickey):
+        result = self._run_local(
+            tmp_dir, sample_xml_with_publickey, ["--print-dnskey", "--print-ds"]
+        )
+        assert result.returncode == 0, result.stderr
+        assert ". IN DNSKEY 257 3 8 " in result.stdout
+        assert ". IN DS " in result.stdout
+
+    def test_print_dnskey_matches_fixture(self, tmp_dir, sample_xml_with_publickey):
+        result = self._run_local(tmp_dir, sample_xml_with_publickey, ["--print-dnskey"])
+        fixtures_dir = os.path.join(os.path.dirname(__file__), "fixtures")
+        with open(os.path.join(fixtures_dir, "ksk-as-dnskey.txt")) as f:
+            assert result.stdout == f.read()
+
+    def test_status_messages_on_stderr(self, tmp_dir, sample_xml_with_publickey):
+        result = self._run_local(tmp_dir, sample_xml_with_publickey, ["--print-ds"])
+        assert result.returncode == 0
+        # Status messages should be on stderr, not stdout
+        assert "KeyDigest" in result.stderr
+        # stdout should only contain DS records
+        for line in result.stdout.strip().split("\n"):
+            assert line.startswith(". IN DS ")
