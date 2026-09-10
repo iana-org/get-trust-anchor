@@ -62,8 +62,14 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, NoReturn
 from urllib.request import urlopen
+
+try:
+    __version__ = version("get-trust-anchor")
+except PackageNotFoundError:
+    __version__ = "unknown"
 
 # Type aliases
 KskDict = dict[str, str | int]
@@ -424,6 +430,11 @@ def main() -> int:
     ds_record_filename = "ksk-as-ds.txt"
 
     cmd_parse = argparse.ArgumentParser(description="DNSSEC Trust Anchor Tool")
+    cmd_parse.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
     cmd_parse.add_argument(
         "--local",
         dest="local",

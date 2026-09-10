@@ -54,6 +54,7 @@ Or invoke as a Python module:
 | `--keep` | Keep temporary files (XML and signature) after running |
 | `--print-dnskey` | Print DNSKEY records to stdout instead of writing files |
 | `--print-ds` | Print DS records to stdout instead of writing files |
+| `--version` | Print the tool's version and exit |
 
 ### Output
 
@@ -82,6 +83,17 @@ Check formatting, lint, and types:
     ruff format --check .
     ruff check .
     ty check
+
+### Releasing
+
+To publish a new version on GitHub, bump `version` in
+[pyproject.toml](pyproject.toml), commit it, then push a matching tag:
+
+    git tag v1.0.0
+    git push origin v1.0.0
+
+Pushing a `v*` tag triggers the [release workflow](.github/workflows/release.yml),
+which builds the sdist/wheel and publishes a GitHub Release with them attached.
 
 ## License
 
