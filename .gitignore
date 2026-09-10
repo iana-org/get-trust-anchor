@@ -3,8 +3,10 @@
 ksk-as-*.txt
 root.zone
 root-anchors.*
-venv2
-venv3
+!tests/fixtures/
+venv
+__pycache__
 *.egg-info
 build
 dist
+.pytest_cache
