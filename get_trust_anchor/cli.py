@@ -429,7 +429,9 @@ def main() -> int:
     dnskey_record_filename = "ksk-as-dnskey.txt"
     ds_record_filename = "ksk-as-ds.txt"
 
-    cmd_parse = argparse.ArgumentParser(description="DNSSEC Trust Anchor Tool")
+    cmd_parse = argparse.ArgumentParser(
+        prog="get-trust-anchor", description="DNSSEC Trust Anchor Tool"
+    )
     cmd_parse.add_argument(
         "--version",
         action="version",
