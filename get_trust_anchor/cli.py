@@ -35,14 +35,14 @@ This tool writes out a copy of the current DNSSEC trust anchor.
 The steps it uses are:
     Step 1. Fetch the trust anchor file from IANA using HTTPS
     Step 2. Fetch the S/MIME signature for the trust anchor file from IANA using HTTPS
-    Step 3. Validate the signature on the trust anchor file using a built-in IANA CA key
+    Step 3. Validate the signature on the trust anchor file using the built-in ICANN CA certificates
     Step 4. Extract the trust anchor key digests from the trust anchor file
     Step 5. Check the validity period for each digest
     Step 6. Verify that the trust anchors match the KSK in the root zone file
     Step 7. Write out the trust anchors as a DNSKEY and DS records
 
-Note that the validation is done against a built-in ICANN CA, not one retrieved through a
-URL. This means that even if HTTPS authentication checking isn't done, the resulting
+Note that the validation is done against built-in ICANN CA certificates, not ones retrieved
+through a URL. This means that even if HTTPS authentication checking isn't done, the resulting
 trust anchors are still cryptographically validated.
 """
 
@@ -75,8 +75,12 @@ except PackageNotFoundError:
 KskDict = dict[str, str | int]
 TrustAnchorDict = dict[str, str]
 
-ICANN_ROOT_CA_CERT = """
------BEGIN CERTIFICATE-----
+# The built-in ICANN CA certificates, from https://data.iana.org/root-anchors/icannbundle.pem.
+# A signature that chains to any of them is accepted.
+
+# ICANN Root CA, valid 2009-12-23 to 2029-12-18, SHA-256 fingerprint
+#   AE:E8:99:06:D7:CC:60:C5:E1:51:F3:BB:92:3A:BF:8A:1B:28:DC:85:5D:5E:21:27:CB:52:4E:AD:4A:AD:60:3D
+ICANN_ROOT_CA = """-----BEGIN CERTIFICATE-----
 MIIDdzCCAl+gAwIBAgIBATANBgkqhkiG9w0BAQsFADBdMQ4wDAYDVQQKEwVJQ0FO
 TjEmMCQGA1UECxMdSUNBTk4gQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkxFjAUBgNV
 BAMTDUlDQU5OIFJvb3QgQ0ExCzAJBgNVBAYTAlVTMB4XDTA5MTIyMzA0MTkxMloX
@@ -96,8 +100,45 @@ DQEBCwUAA4IBAQAP8emCogqHny2UYFqywEuhLys7R9UKmYY4suzGO4nkbgfPFMfH
 15nu5JBSewrCkYqYYmaxyOC3WrVGfHZxVI7MpIFcGdvSb2a1uyuua8l0BKgk3ujF
 0/wsHNeP22qNyVO+XVBzrM8fk8BSUFuiT/6tZTYXRtEt5aKQZgXbKU5dUF3jT9qg
 j/Br5BZw3X/zd325TvnswzMC1+ljLzHnQGGk
------END CERTIFICATE-----
-"""
+-----END CERTIFICATE-----"""
+
+# ICANN Root CA v2, valid 2025-03-20 to 2045-03-20, SHA-256 fingerprint
+#   D8:EE:E1:B7:42:08:B8:16:3E:1C:2B:99:0F:82:DD:9F:75:22:36:BA:13:0C:92:93:9E:77:28:EA:46:4E:BF:C3
+ICANN_ROOT_CA_V2 = """-----BEGIN CERTIFICATE-----
+MIIFsTCCA5mgAwIBAgIUQFsYkgroBoe69HKQPy8/DQuiLwgwDQYJKoZIhvcNAQEN
+BQAwYDELMAkGA1UEBhMCVVMxDjAMBgNVBAoMBUlDQU5OMSYwJAYDVQQLDB1JQ0FO
+TiBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0eTEZMBcGA1UEAwwQSUNBTk4gUm9vdCBD
+QSB2MjAeFw0yNTAzMjAyMTA0MjZaFw00NTAzMjAyMTA0MjZaMGAxCzAJBgNVBAYT
+AlVTMQ4wDAYDVQQKDAVJQ0FOTjEmMCQGA1UECwwdSUNBTk4gQ2VydGlmaWNhdGlv
+biBBdXRob3JpdHkxGTAXBgNVBAMMEElDQU5OIFJvb3QgQ0EgdjIwggIiMA0GCSqG
+SIb3DQEBAQUAA4ICDwAwggIKAoICAQCepDjrubjR7en/uZWo7MAnzFIIvUPYEc7b
++AlefdlEDQ1JEmpfrvt/4CX9lJ9ShIBR6zwrQeDvrj5XZ2kEjbJ8Nnc6sM/ojdyr
+5jSLqcDPH9fJg7jCW02KF8CtqWsnqcW6jjTIZcCWkg9lEixdF8QAjIEgJtZte+Yh
+XeyN0KD2EaO8U5Id0bLvMyphuO1OCGKzDtetcX8K7SvoshdJx3lPIlYzqXl0nVAY
+iCeNdeDzTNjEOHYJOP6dYoZI8nKRJltMkZcCCjBE2vQuSMY2w4pOlWk1skHjMWXj
+QsZzngXuNG56zialL0TPEDVWjWRjzOnruHUAs4KUY8Zs+Nt8JdSlXMi825PKoKpp
+ESs7/ZG1mPjVOYp7Z7ntrRjJFgnUBjWzVPOx4yHiJj1ur+OpqP18oP5YfqY+tKmz
+7vlfRGGOEd08a0XgZISDNKpMAovn5pRUHTWPCCjc28tns9ODPvr1cQi+QSwTv+v8
+wnA5etGrsead88Rv/ieaq5ikMJTRDfW4d9SY2uPcMGvfU6VdQLRhQkzEVTQNAJ1R
+i2lOoJbbjwnK+OU9OhST/OqdjJDJAhTAstdUnrr8WBU80xM75MIaaTjSBCvZ1wro
+pAi2hYb0tedTH6WarSW3MH9HcEoGGzs2GD3hDB0a2eCp+TdAs8Up944SjY7UV4Jx
+sOC7TxbmkQIDAQABo2MwYTAdBgNVHQ4EFgQU+1EuMRuOZ/ecsfYzNQ+yGZsxZrMw
+HwYDVR0jBBgwFoAU+1EuMRuOZ/ecsfYzNQ+yGZsxZrMwDwYDVR0TAQH/BAUwAwEB
+/zAOBgNVHQ8BAf8EBAMCAf4wDQYJKoZIhvcNAQENBQADggIBACz38SkKR1WsEZnX
+x1BKaS5/oQPw+7quDQCKGoD2Vz7CR7yQh4zQn/Hh0173vKvRWcwN2io0iLJ1ysv5
+jXBLeWZh3djiQlXP3iWp4s01SiUwmFssxi3SD1IT2jNosk1xcVWthle9zth7Y8Mp
+iUJYnHobP7tX7H2g+I8Rqw2sEX/yPSYMYcdH5a1xRMPOLHTyOaCgevRBBBtXkiAJ
+Ob9QKZTaFaXntPXBKNSGkVb2d+2qKyJMrwd0KNI+SVSoIgNDAxkNOdi9x6X6ETW2
+4aYFsytohFVkNUXx2eFYRim4yjnD8PHIvDQSofLfSAC5TOERtwUFd+Mw3/di+HCm
+50OJPyoxZLjWQCCfNUZzgZZOe+zT6lgBiV3KB0UuuAdq7jGUeH/328HJDi30BvNj
++TNb9Hmpm+ZDguM+f8p7GxapX8AVNu/xErtl4msYiVJrr1qqV+qLLEMwIz0raujG
+FFDd6N43wgduffbU20pThry0Y7rku5+RZjUZe/T7ZL+NUKiqXAPufrkqVkjX/8T+
+wyNZz8KkiQwkJthojpppa79FDxn/A2M8tt+FQqIONAUPR2m5nurVgftQH0z5ZtDB
+YykUlkUiPOJNXoDOIkbpA7lW2wezeY4te+EiSeUZSE541N5QBwaItaonIZsIgn6C
+pMnwChV9468oRE20bdqq9+Go7g4E
+-----END CERTIFICATE-----"""
+
+ICANN_ROOT_CA_CERTS = [ICANN_ROOT_CA, ICANN_ROOT_CA_V2]
 
 URL_ROOT_ANCHORS = "https://data.iana.org/root-anchors/root-anchors.xml"
 URL_ROOT_ANCHORS_SIGNATURE = "https://data.iana.org/root-anchors/root-anchors.p7s"
@@ -122,6 +163,11 @@ def bytes_to_string(byte_array: bytes | str) -> str:
     if isinstance(byte_array, str):
         return byte_array
     return byte_array.decode("ascii")
+
+
+def pem_bundle(certs: list[str]) -> str:
+    """Join PEM certificates into the text of a CA file."""
+    return "\n\n".join(certs) + "\n"
 
 
 def write_out_file(file_name: str, file_contents: str | bytes) -> None:
@@ -230,10 +276,16 @@ def fetch_ksk_from_zonefile() -> list[KskDict] | None:
 
 
 def validate_detached_signature(
-    contents_filename: str, signature_filename: str, ca_filename: str
+    contents_filename: str,
+    signature_filename: str,
+    ca_filename: str,
+    at_time: datetime.datetime | None = None,
 ) -> None:
     """Takes the name of the contents file, the signature file, and CA file;
-    returns nothing if sucessful or dies if openssl returns an error."""
+    returns nothing if sucessful or dies if openssl returns an error.
+    The CA file may hold several certificates; any of them can anchor the signature.
+    at_time (timezone-aware) checks certificate validity at that time instead of now;
+    used by tests."""
     # Run openssl to validate the signature
     validate_command = [
         "openssl",
@@ -248,6 +300,8 @@ def validate_detached_signature(
         "-content",
         contents_filename,
     ]
+    if at_time is not None:
+        validate_command += ["-attime", str(int(at_time.timestamp()))]
     # Fixed command name and internally-generated file paths, not shell input.
     validate_result = subprocess.run(  # noqa: S603
         validate_command, capture_output=True, check=False
@@ -453,7 +507,7 @@ def main() -> int:
         "--root-ca",
         dest="root_ca",
         type=str,
-        help="Name of local root anchor CA file instead of using built-in ICANN_ROOT_CA_CERT",
+        help="PEM file of CA certificates to use instead of the built-in ICANN CA certificates",
     )
     cmd_parse.add_argument(
         "--no-validation",
@@ -538,14 +592,14 @@ def main() -> int:
                 f" The returned text was '{this_exception}'."
             )
 
-    ### Step 3. Validate the signature on the trust anchor file using a
-    ### built-in IANA CA key. Skip this step if using a local file.
+    ### Step 3. Validate the signature on the trust anchor file using the
+    ### built-in ICANN CA certificates. Skip this step if --no-validation is given.
     if opts.root_ca:
         icann_ca_filename = opts.root_ca
     else:
         (_, icann_ca_filename) = tempfile.mkstemp(prefix="icann_ca_")
         temp_files.append(icann_ca_filename)
-        write_out_file(icann_ca_filename, ICANN_ROOT_CA_CERT)
+        write_out_file(icann_ca_filename, pem_bundle(ICANN_ROOT_CA_CERTS))
 
     if opts.no_validation is not True:
         validate_detached_signature(trust_anchor_filename, signature_filename, icann_ca_filename)
