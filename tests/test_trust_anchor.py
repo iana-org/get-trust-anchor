@@ -300,8 +300,8 @@ class TestWriteOutFile:
 
 class TestBuiltinCaCertificates:
     def test_matches_published_bundle(self):
-        # Point-in-time check that we're using IANA's CA certificates: the CA file the tool
-        # writes matches icannbundle.pem's entry in
+        # Point-in-time check that the built-in ICANN CA certificates are the published
+        # ones: the CA file the tool writes matches icannbundle.pem's entry in
         # https://data.iana.org/root-anchors/checksums-sha256.txt (2026-10-19).
         ca_file = pem_bundle(ICANN_ROOT_CA_CERTS).encode()
         assert (
