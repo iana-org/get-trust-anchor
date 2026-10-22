@@ -356,6 +356,35 @@ class TestValidateDetachedSignature:
             )
 
 
+# --- system CA store ---
+
+# The signature must chain to the ICANN CA certificates, not to any CA the system trusts.
+# This is a root-anchors.xml (one KeyTag changed) signed under a throwaway test CA whose
+# keys were discarded. CI adds the test CA to the system CA store and sets
+# GET_TRUST_ANCHOR_TEST_CA_IN_SYSTEM_STORE=1 (see .github/workflows/test.yml).
+SYSTEM_CA_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "system-ca")
+SYSTEM_CA = os.path.join(SYSTEM_CA_DIR, "test-ca.pem")
+SYSTEM_CA_XML = os.path.join(SYSTEM_CA_DIR, "root-anchors.xml")
+SYSTEM_CA_P7S = os.path.join(SYSTEM_CA_DIR, "root-anchors.p7s")
+
+
+class TestSystemCaStore:
+    def test_sample_validates_against_its_ca(self):
+        # Control: the sample's signature is valid when its CA is the CA file.
+        validate_detached_signature(SYSTEM_CA_XML, SYSTEM_CA_P7S, SYSTEM_CA)
+
+    @pytest.mark.skipif(
+        os.environ.get("GET_TRUST_ANCHOR_TEST_CA_IN_SYSTEM_STORE") != "1",
+        reason="needs the test CA in the system CA store (done in CI)",
+    )
+    def test_system_ca_store_not_trusted(self, tmp_path):
+        ca_filename = str(tmp_path / "ca.pem")
+        with open(ca_filename, "w") as f:
+            f.write(pem_bundle(ICANN_ROOT_CA_CERTS))
+        with pytest.raises(SystemExit):
+            validate_detached_signature(SYSTEM_CA_XML, SYSTEM_CA_P7S, ca_filename)
+
+
 # --- CLI integration ---
 
 

@@ -27,6 +27,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
@@ -37,5 +38,62 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: pip install -e ".[test]"
+      - name: Add the test CA to the system CA store
+        run: |
+          sudo cp tests/fixtures/system-ca/test-ca.pem \
+            /usr/local/share/ca-certificates/get-trust-anchor-test-ca.crt
+          sudo update-ca-certificates
+          openssl verify tests/fixtures/system-ca/test-ca.pem
       - name: Run tests
         run: pytest
+        env:
+          GET_TRUST_ANCHOR_TEST_CA_IN_SYSTEM_STORE: "1"
+
+  # The OpenSSL 1.1.1 and LibreSSL jobs run in containers started with docker run, not
+  # "container:", because GitHub's JavaScript actions do not run in Alpine (musl).
+
+  test-openssl11:
+    name: test (Rocky Linux 8, OpenSSL 1.1.1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run tests in rockylinux/rockylinux:8
+        run: |
+          docker run --rm -i -v "$PWD:/src" -w /src rockylinux/rockylinux:8 sh -eux <<'EOF'
+          dnf -q -y install openssl python3.11
+          openssl version
+          # Add the test CA to OpenSSL's default CA directory (update-ca-trust
+          # alone does not reach openssl smime) and check openssl now trusts it.
+          test_ca=tests/fixtures/system-ca/test-ca.pem
+          cp "$test_ca" "/etc/pki/tls/certs/$(openssl x509 -hash -noout -in "$test_ca").0"
+          openssl verify "$test_ca"
+          python3.11 -m venv /tmp/venv
+          /tmp/venv/bin/pip install -q -e ".[test]"
+          GET_TRUST_ANCHOR_TEST_CA_IN_SYSTEM_STORE=1 /tmp/venv/bin/pytest -p no:cacheprovider
+          EOF
+
+  test-libressl:
+    name: test (Alpine, LibreSSL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run tests in alpine:3.24
+        run: |
+          docker run --rm -i -v "$PWD:/src" -w /src alpine:3.24 sh -eux <<'EOF'
+          apk add -q libressl python3
+          # Alpine installs LibreSSL's command line tool as "libressl".
+          ln -sf /usr/bin/libressl /usr/local/bin/openssl
+          openssl version
+          # Add the test CA to LibreSSL's default CA directory and check
+          # openssl now trusts it.
+          test_ca=tests/fixtures/system-ca/test-ca.pem
+          mkdir -p /etc/ssl/certs
+          cp "$test_ca" "/etc/ssl/certs/$(openssl x509 -hash -noout -in "$test_ca").0"
+          openssl verify "$test_ca"
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install -q -e ".[test]"
+          # Only the system CA store tests: LibreSSL's smime has no -attime, which the
+          # date-pinned validation tests need.
+          GET_TRUST_ANCHOR_TEST_CA_IN_SYSTEM_STORE=1 /tmp/venv/bin/pytest -p no:cacheprovider \
+            tests/test_trust_anchor.py::TestSystemCaStore
+          EOF
