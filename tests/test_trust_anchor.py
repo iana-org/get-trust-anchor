@@ -436,6 +436,12 @@ class TestSystemTrustOptions:
         assert f"WARNING: using BoringSSL with --system-trust-options (-CApath {empty_dir})" in err
         assert "Validation of the signature over the file succeeded." in err
 
+    def test_unrecognised_option_fails(self, tmp_path, monkeypatch):
+        # OpenSSL 3.0.13 and 1.1.1k exit 0 on an option they do not recognise, without
+        # verifying; this must still fail.
+        with pytest.raises(SystemExit):
+            self._validate(tmp_path, monkeypatch, ["-no-such-option"])
+
 
 # --- CLI integration ---
 

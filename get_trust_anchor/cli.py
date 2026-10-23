@@ -379,8 +379,14 @@ def validate_detached_signature(
             f"When running openssl, the return code was {validate_result.returncode} ",
             f"and the output was the following.\n{validate_result.stderr} {validate_result.stdout}",
         )
-    else:
-        log("Validation of the signature over the file succeeded.")
+    # openssl smime can exit 0 without verifying (e.g. given an option it does not
+    # recognise), so also require it to report success.
+    if not re.search(rb"verification\s+successful", validate_result.stderr, re.IGNORECASE):
+        die(
+            "openssl did not report verification successful, so the signature is not",
+            f" treated as valid. Its output was the following.\n{validate_result.stderr}",
+        )
+    log("Validation of the signature over the file succeeded.")
 
 
 def extract_trust_anchors_from_xml(trust_anchor_xml: bytes | str) -> list[TrustAnchorDict]:
