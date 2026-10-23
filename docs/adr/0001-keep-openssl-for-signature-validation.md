@@ -12,8 +12,8 @@ with the openssl command line tool:
 openssl smime -verify -CAfile <CA file> -inform der -in <p7s> -content <xml>
 ```
 
-Only the built-in ICANN CA certificates, or
-a `--root-ca` file - should be able to anchor the signature. But
+Only the built-in ICANN CA certificates, or a `--root-ca` file, should be able
+to anchor the signature. But
 `openssl smime -verify` also uses openssl's default trust locations (the
 default CA directory and, on OpenSSL 3, the default CA store), and how to turn
 those off differs between OpenSSL and LibreSSL versions.
@@ -25,26 +25,28 @@ the system trust store, was accepted when run using the built-in ICANN CA certif
 
 | Runtime | Test CA added with | Options that rejected it |
 |---|---|---|
+| OpenSSL 4.0.3, Fedora 45 | hashed into `/etc/pki/tls/certs` | `-no-CApath -no-CAstore` |
 | OpenSSL 3.0.13, Ubuntu 24.04 | `update-ca-certificates` | `-no-CApath -no-CAstore` |
 | OpenSSL 1.1.1f, Ubuntu 20.04 | `update-ca-certificates` | `-no-CApath` |
 | OpenSSL 1.1.1k, Rocky Linux 8 | hashed into `/etc/pki/tls/certs` | `-no-CApath` |
 | LibreSSL 4.3.1, Alpine 3.24 | hashed into `/etc/ssl/certs` | `-CApath <empty dir>` |
 
 With those options, IANA's published file still validated (checked on
-OpenSSL 3.0.13, 1.1.1k and LibreSSL 4.3.1). The same failure was reproduced in
-CI on Ubuntu, Rocky Linux 8 and Alpine.
+OpenSSL 4.0.3, 3.0.13, 1.1.1k and LibreSSL 4.3.1). The same failure was
+reproduced in CI on Ubuntu, Rocky Linux 8 and Alpine, and locally on Fedora 45.
 
 `openssl smime -verify` given an option it does not recognise:
 
 | Runtime | Exit code | Verified |
 |---|---|---|
+| OpenSSL 4.0.3 | 0 | no |
 | OpenSSL 3.0.13 | 0 | no |
 | OpenSSL 1.1.1k | 0 (also for `-no-CAstore`) | no |
 | LibreSSL 4.3.1 | 0 (also for `-attime`) | no |
 | LibreSSL 3.3.6, macOS | 1 | no |
 
 A successful verification exited 0 and printed `Verification successful` on
-all four; that text is not a documented interface. The LibreSSL behaviour
+all five; that text is not a documented interface. The LibreSSL behaviour
 contradicts its own documentation (exit 1 for option errors) and has been
 reported upstream.
 
@@ -52,6 +54,7 @@ reported upstream.
 
 - Runtime: Python 3.10 or later and the openssl command line tool.
 - openssl versions on current systems and those still in LTS support:
+  - OpenSSL 4.x - Fedora 45.
   - OpenSSL 3.x - current Linux distributions.
   - OpenSSL 1.1.1 - RHEL 8 supported until 2029-05-31.
   - LibreSSL - OpenBSD and DragonFly BSD.
@@ -69,8 +72,8 @@ limit trust to `-CAfile`, chosen from `openssl version`:
 | anything else | refuse to validate |
 
 `--system-trust-options="..."` replaces these options with the operator's
-own, unrestricted, and logs a warning. The openssl version and options used
-are logged on every run.
+own, unrestricted, and logs a warning naming them. The openssl version is
+logged on every run.
 
 Because the exit code alone does not show that verification happened,
 validation succeeds only if openssl also reports `Verification successful` on

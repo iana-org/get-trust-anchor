@@ -73,6 +73,30 @@ jobs:
       - name: Run tests
         run: docker exec -e GET_TRUST_ANCHOR_TEST_CA_IN_SYSTEM_STORE=1 ci /tmp/venv/bin/pytest
 
+  test-openssl4:
+    name: test (Fedora 45, OpenSSL 4)
+    runs-on: ubuntu-latest
+    env:
+      TEST_CA: tests/fixtures/system-ca/test-ca.pem
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start fedora:45
+        run: docker run -d --name ci -v "$PWD:/src" -w /src fedora:45 sleep infinity
+      - name: Install dependencies
+        run: |
+          docker exec ci dnf -q -y install openssl python3
+          docker exec ci openssl version
+          docker exec ci python3 -m venv /tmp/venv
+          docker exec ci /tmp/venv/bin/pip install -q -e ".[test]"
+      - name: Add the test CA to the system CA store
+        # OpenSSL's default CA directory.
+        run: |
+          docker exec -e TEST_CA ci sh -c \
+            'cp "$TEST_CA" "/etc/pki/tls/certs/$(openssl x509 -hash -noout -in "$TEST_CA").0"'
+          docker exec ci openssl verify "$TEST_CA"
+      - name: Run tests
+        run: docker exec -e GET_TRUST_ANCHOR_TEST_CA_IN_SYSTEM_STORE=1 ci /tmp/venv/bin/pytest
+
   test-libressl:
     name: test (Alpine, LibreSSL)
     runs-on: ubuntu-latest
