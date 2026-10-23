@@ -13,16 +13,18 @@ other dependencies.
 
 1. Fetches the trust anchor XML from IANA over HTTPS
 2. Fetches the corresponding S/MIME signature from IANA
-3. Validates the signature using a built-in ICANN Root CA certificate
+3. Validates the signature using the built-in ICANN CA certificates
 4. Extracts the trust anchor key digests from the XML
 5. Checks the validity period for each digest
 6. Fetches the current root KSK via [Google Public DNS](https://developers.google.com/speed/public-dns/)
    over HTTPS (falling back to the [root zone file](https://www.internic.net/domain/root.zone))
 7. Matches the KSKs against the trust anchors and writes them out
 
-The signature validation uses a CA certificate embedded in the tool
-itself, so the trust anchors are cryptographically verified regardless
-of whether HTTPS certificate checking succeeds.
+The signature validation uses the built-in ICANN CA certificates, so
+the trust anchors are cryptographically verified regardless of whether
+HTTPS certificate checking succeeds. The built-in ICANN CA certificates
+are ICANN Root CA and its successor, ICANN Root CA v2; a signature that
+chains to either one is accepted.
 
 ## Installation
 
@@ -48,8 +50,9 @@ Or invoke as a Python module:
 |---|---|
 | `--local FILE` | Use a local trust anchor XML file instead of fetching from IANA |
 | `--local-sig FILE` | Use a local signature file instead of fetching from IANA |
-| `--root-ca FILE` | Use a custom root CA certificate instead of the built-in one |
+| `--root-ca FILE` | Use a PEM file of CA certificates instead of the built-in ones |
 | `--no-validation` | Skip signature validation |
+| `--system-trust-options="OPTS"` | openssl smime options to use instead of the tool's version-based choice for excluding the system's CA certificates, e.g. `"-no-CApath -no-CAstore"` (`""` for none) |
 | `--ksks-from-trust-anchor` | Extract KSKs directly from the trust anchor XML instead of fetching from DNS |
 | `--keep` | Keep temporary files (XML and signature) after running |
 | `--print-dnskey` | Print DNSKEY records to stdout instead of writing files |
