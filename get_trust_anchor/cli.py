@@ -50,18 +50,21 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import datetime
 import hashlib
 import json
 import os
 import pprint
 import re
+import shlex
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree
+from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, NoReturn
 from urllib.request import urlopen
@@ -275,37 +278,102 @@ def fetch_ksk_from_zonefile() -> list[KskDict] | None:
     return ksks
 
 
+def openssl_version() -> str:
+    """Return the local openssl's version line, e.g. "OpenSSL 3.0.13 30 Jan 2024";
+    dies if `openssl version` fails."""
+    result = subprocess.run(
+        ["openssl", "version"],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    version = result.stdout.strip()
+    if result.returncode != 0 or not version:
+        detail = f": {result.stderr.strip()}" if result.stderr.strip() else ""
+        die(f"Could not run 'openssl version' (exit code {result.returncode}){detail}.")
+    return version
+
+
+def verification_options(version: str, make_empty_dir: Callable[[], str]) -> list[str]:
+    """Return the openssl smime options that stop it trusting anything but -CAfile:
+    the default CA directory and, on OpenSSL 3, the default CA store.
+    make_empty_dir is called only when an empty directory is needed."""
+    if version.startswith("LibreSSL "):
+        # LibreSSL has no -no-CApath; point -CApath at an empty directory instead.
+        return ["-CApath", make_empty_dir()]
+
+    match = re.match(r"^OpenSSL (\d+)\.(\d+)", version)
+    if not match:
+        raise ValueError(f"Unsupported openssl: {version!r}")
+
+    major, minor = map(int, match.groups())
+
+    if major >= 3:
+        return ["-no-CApath", "-no-CAstore"]
+    if major == 1 and minor == 1:
+        return ["-no-CApath"]
+
+    raise ValueError(f"Unsupported openssl: {version!r}")
+
+
 def validate_detached_signature(
     contents_filename: str,
     signature_filename: str,
     ca_filename: str,
     at_time: datetime.datetime | None = None,
+    system_trust_options: list[str] | None = None,
 ) -> None:
     """Takes the name of the contents file, the signature file, and CA file;
     returns nothing if sucessful or dies if openssl returns an error.
     The CA file may hold several certificates; any of them can anchor the signature.
+    Only the certificates in the CA file are trusted, not the system's CA certificates:
+    the openssl options for that are chosen from the openssl version, unless
+    system_trust_options is given, which replaces them.
     at_time (timezone-aware) checks certificate validity at that time instead of now;
     used by tests."""
-    # Run openssl to validate the signature
-    validate_command = [
-        "openssl",
-        "smime",
-        "-verify",
-        "-CAfile",
-        ca_filename,
-        "-inform",
-        "der",
-        "-in",
-        signature_filename,
-        "-content",
-        contents_filename,
-    ]
-    if at_time is not None:
-        validate_command += ["-attime", str(int(at_time.timestamp()))]
-    # Fixed command name and internally-generated file paths, not shell input.
-    validate_result = subprocess.run(  # noqa: S603
-        validate_command, capture_output=True, check=False
-    )
+    version = openssl_version()
+    with contextlib.ExitStack() as temp_dirs:
+
+        def make_empty_dir() -> str:
+            empty_dir = temp_dirs.enter_context(tempfile.TemporaryDirectory(prefix="empty_"))
+            log(f"Created empty directory {empty_dir} for -CApath.")
+            return empty_dir
+
+        if system_trust_options is not None:
+            trust_options = system_trust_options
+            log(
+                f"WARNING: using {version} with --system-trust-options"
+                f" ({' '.join(trust_options) or 'none'}) instead of the options this tool chooses."
+            )
+        else:
+            try:
+                trust_options = verification_options(version, make_empty_dir)
+            except ValueError as this_exception:
+                die(
+                    f"{this_exception}. Use --system-trust-options to give the openssl"
+                    " options that stop it trusting the system's CA certificates."
+                )
+            log(f"Using {version}.")
+        validate_command = [
+            "openssl",
+            "smime",
+            "-verify",
+            "-CAfile",
+            ca_filename,
+            *trust_options,
+            "-inform",
+            "der",
+            "-in",
+            signature_filename,
+            "-content",
+            contents_filename,
+        ]
+        if at_time is not None:
+            validate_command += ["-attime", str(int(at_time.timestamp()))]
+        # An argument list, not a shell command; --system-trust-options are passed as given.
+        validate_result = subprocess.run(  # noqa: S603
+            validate_command, capture_output=True, check=False
+        )
     if validate_result.returncode != 0:
         die(
             f"When running openssl, the return code was {validate_result.returncode} ",
@@ -516,6 +584,14 @@ def main() -> int:
         help="Disable validation for remote or local files",
     )
     cmd_parse.add_argument(
+        "--system-trust-options",
+        type=shlex.split,
+        metavar="OPTIONS",
+        help="openssl smime options to use instead of the tool's version-based choice for "
+        "excluding the system's CA certificates; use the = form, e.g. "
+        '--system-trust-options="-no-CApath -no-CAstore", or "" for none',
+    )
+    cmd_parse.add_argument(
         "--ksks-from-trust-anchor",
         dest="ksks_from_trust_anchor",
         action="store_true",
@@ -600,9 +676,15 @@ def main() -> int:
         (_, icann_ca_filename) = tempfile.mkstemp(prefix="icann_ca_")
         temp_files.append(icann_ca_filename)
         write_out_file(icann_ca_filename, pem_bundle(ICANN_ROOT_CA_CERTS))
+        log(f"Wrote the built-in ICANN CA certificates to {icann_ca_filename}.")
 
     if opts.no_validation is not True:
-        validate_detached_signature(trust_anchor_filename, signature_filename, icann_ca_filename)
+        validate_detached_signature(
+            trust_anchor_filename,
+            signature_filename,
+            icann_ca_filename,
+            system_trust_options=opts.system_trust_options,
+        )
     else:
         log("Not validating the local trust anchor file.")
 

@@ -21,6 +21,7 @@ from get_trust_anchor.cli import (
     get_valid_trust_anchors,
     pem_bundle,
     validate_detached_signature,
+    verification_options,
     write_out_file,
 )
 
@@ -383,6 +384,57 @@ class TestSystemCaStore:
             f.write(pem_bundle(ICANN_ROOT_CA_CERTS))
         with pytest.raises(SystemExit):
             validate_detached_signature(SYSTEM_CA_XML, SYSTEM_CA_P7S, ca_filename)
+
+
+class TestVerificationOptions:
+    @pytest.mark.parametrize(
+        ("version", "expected"),
+        [
+            # Version lines printed by openssl in CI or local testing.
+            (
+                "OpenSSL 3.0.13 30 Jan 2024 (Library: OpenSSL 3.0.13 30 Jan 2024)",
+                ["-no-CApath", "-no-CAstore"],
+            ),
+            ("OpenSSL 1.1.1k  FIPS 25 Mar 2021", ["-no-CApath"]),
+            ("LibreSSL 4.3.1", ["-CApath", "/empty"]),
+            ("LibreSSL 3.3.6", ["-CApath", "/empty"]),
+        ],
+    )
+    def test_supported(self, version, expected):
+        assert verification_options(version, lambda: "/empty") == expected
+
+    @pytest.mark.parametrize("version", ["OpenSSL 1.0.2k-fips  26 Jan 2017", "BoringSSL", ""])
+    def test_unsupported(self, version):
+        with pytest.raises(ValueError):
+            verification_options(version, lambda: "/empty")
+
+
+class TestSystemTrustOptions:
+    def _validate(self, tmp_path, monkeypatch, system_trust_options):
+        monkeypatch.setattr("get_trust_anchor.cli.openssl_version", lambda: "BoringSSL")
+        ca_filename = str(tmp_path / "ca.pem")
+        with open(ca_filename, "w") as f:
+            f.write(pem_bundle(ICANN_ROOT_CA_CERTS))
+        validate_detached_signature(
+            SAMPLE_XML,
+            SAMPLE_P7S,
+            ca_filename,
+            at_time=SAMPLE_TIME,
+            system_trust_options=system_trust_options,
+        )
+
+    def test_unsupported_openssl_refused(self, tmp_path, monkeypatch, capsys):
+        with pytest.raises(SystemExit):
+            self._validate(tmp_path, monkeypatch, None)
+        assert "--system-trust-options" in capsys.readouterr().err
+
+    def test_options_replace_the_chosen_ones(self, tmp_path, monkeypatch, capsys):
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        self._validate(tmp_path, monkeypatch, ["-CApath", str(empty_dir)])
+        err = capsys.readouterr().err
+        assert f"WARNING: using BoringSSL with --system-trust-options (-CApath {empty_dir})" in err
+        assert "Validation of the signature over the file succeeded." in err
 
 
 # --- CLI integration ---

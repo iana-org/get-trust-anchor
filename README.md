@@ -52,6 +52,7 @@ Or invoke as a Python module:
 | `--local-sig FILE` | Use a local signature file instead of fetching from IANA |
 | `--root-ca FILE` | Use a PEM file of CA certificates instead of the built-in ones |
 | `--no-validation` | Skip signature validation |
+| `--system-trust-options="OPTS"` | openssl smime options to use instead of the tool's version-based choice for excluding the system's CA certificates, e.g. `"-no-CApath -no-CAstore"` (`""` for none) |
 | `--ksks-from-trust-anchor` | Extract KSKs directly from the trust anchor XML instead of fetching from DNS |
 | `--keep` | Keep temporary files (XML and signature) after running |
 | `--print-dnskey` | Print DNSKEY records to stdout instead of writing files |
