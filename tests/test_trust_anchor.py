@@ -1,5 +1,7 @@
 """Tests for get_trust_anchor."""
 
+import datetime
+import hashlib
 import os
 import subprocess
 import sys
@@ -7,6 +9,8 @@ import sys
 import pytest
 
 from get_trust_anchor.cli import (
+    ICANN_ROOT_CA_CERTS,
+    ICANN_ROOT_CA_V2,
     bytes_to_string,
     dnskey_to_hex_of_hash,
     export_ksk,
@@ -15,6 +19,8 @@ from get_trust_anchor.cli import (
     format_records,
     get_matching_ksk,
     get_valid_trust_anchors,
+    pem_bundle,
+    validate_detached_signature,
     write_out_file,
 )
 
@@ -287,6 +293,67 @@ class TestWriteOutFile:
         # A backup file should exist
         backups = [f for f in os.listdir(".") if f.startswith("test.txt.backup_")]
         assert len(backups) == 1
+
+
+# --- built-in ICANN CA certificates ---
+
+
+class TestBuiltinCaCertificates:
+    def test_matches_published_bundle(self):
+        # Point-in-time check that we're using IANA's CA certificates: the CA file the tool
+        # writes matches icannbundle.pem's entry in
+        # https://data.iana.org/root-anchors/checksums-sha256.txt (2026-10-19).
+        ca_file = pem_bundle(ICANN_ROOT_CA_CERTS).encode()
+        assert (
+            hashlib.sha256(ca_file).hexdigest()
+            == "18ce7215812d1a2cad8d9d4d3d7c26f7235a9b5ec6f0c1e214e15230fd4f9e24"
+        )
+
+
+# --- validate_detached_signature ---
+
+# A real root-anchors.xml/.p7s pair from data.iana.org, signed under ICANN Root CA. It is
+# validated as of its capture date, so certificate expiry never breaks these tests.
+SAMPLE_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "2026-10-19")
+SAMPLE_XML = os.path.join(SAMPLE_DIR, "root-anchors.xml")
+SAMPLE_P7S = os.path.join(SAMPLE_DIR, "root-anchors.p7s")
+SAMPLE_TIME = datetime.datetime(2026, 10, 19, tzinfo=datetime.timezone.utc)
+
+
+class TestValidateDetachedSignature:
+    def _validate(self, tmp_path, certs, content=SAMPLE_XML, at_time=SAMPLE_TIME):
+        ca_filename = str(tmp_path / "ca.pem")
+        with open(ca_filename, "w") as f:
+            f.write(pem_bundle(certs))
+        validate_detached_signature(content, SAMPLE_P7S, ca_filename, at_time=at_time)
+
+    def test_builtin_certs_validate_sample(self, tmp_path):
+        self._validate(tmp_path, ICANN_ROOT_CA_CERTS)
+
+    def test_tampered_content_rejected(self, tmp_path):
+        tampered = str(tmp_path / "root-anchors.xml")
+        with open(SAMPLE_XML, "rb") as f:
+            xml = f.read()
+        with open(tampered, "wb") as f:
+            f.write(xml.replace(b"<KeyTag>20326<", b"<KeyTag>20327<"))
+        with pytest.raises(SystemExit):
+            self._validate(tmp_path, ICANN_ROOT_CA_CERTS, content=tampered)
+
+    def test_v2_alone_rejects_v1_signed_sample(self, tmp_path):
+        # The .p7s carries its own copy of ICANN Root CA; this shows that copy is not
+        # trusted by itself, so the pass above came from the built-in certificates.
+        with pytest.raises(SystemExit):
+            self._validate(tmp_path, [ICANN_ROOT_CA_V2])
+
+    def test_rejected_after_signer_expiry(self, tmp_path):
+        # The signing certificate expires 2029-03-13, before ICANN Root CA (2029-12-18);
+        # this shows at_time reaches openssl.
+        with pytest.raises(SystemExit):
+            self._validate(
+                tmp_path,
+                ICANN_ROOT_CA_CERTS,
+                at_time=datetime.datetime(2029, 6, 1, tzinfo=datetime.timezone.utc),
+            )
 
 
 # --- CLI integration ---
