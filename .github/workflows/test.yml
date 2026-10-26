@@ -27,6 +27,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
@@ -37,5 +38,91 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: pip install -e ".[test]"
+      - name: Add the test CA to the system CA store
+        run: |
+          sudo cp tests/fixtures/system-ca/test-ca.pem \
+            /usr/local/share/ca-certificates/get-trust-anchor-test-ca.crt
+          sudo update-ca-certificates
+          openssl verify tests/fixtures/system-ca/test-ca.pem
       - name: Run tests
         run: pytest
+        env:
+          GET_TRUST_ANCHOR_TEST_CA_IN_SYSTEM_STORE: "1"
+
+  test-openssl11:
+    name: test (Rocky Linux 8, OpenSSL 1.1.1)
+    runs-on: ubuntu-latest
+    env:
+      TEST_CA: tests/fixtures/system-ca/test-ca.pem
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start rockylinux/rockylinux:8
+        run: docker run -d --name ci -v "$PWD:/src" -w /src rockylinux/rockylinux:8 sleep infinity
+      - name: Install dependencies
+        run: |
+          docker exec ci dnf -q -y install openssl python3.11
+          docker exec ci openssl version
+          docker exec ci python3.11 -m venv /tmp/venv
+          docker exec ci /tmp/venv/bin/pip install -q -e ".[test]"
+      - name: Add the test CA to the system CA store
+        # OpenSSL's default CA directory.
+        run: |
+          docker exec -e TEST_CA ci sh -c \
+            'cp "$TEST_CA" "/etc/pki/tls/certs/$(openssl x509 -hash -noout -in "$TEST_CA").0"'
+          docker exec ci openssl verify "$TEST_CA"
+      - name: Run tests
+        run: docker exec -e GET_TRUST_ANCHOR_TEST_CA_IN_SYSTEM_STORE=1 ci /tmp/venv/bin/pytest
+
+  test-openssl4:
+    name: test (Fedora 45, OpenSSL 4)
+    runs-on: ubuntu-latest
+    env:
+      TEST_CA: tests/fixtures/system-ca/test-ca.pem
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start fedora:45
+        run: docker run -d --name ci -v "$PWD:/src" -w /src fedora:45 sleep infinity
+      - name: Install dependencies
+        run: |
+          docker exec ci dnf -q -y install openssl python3
+          docker exec ci openssl version
+          docker exec ci python3 -m venv /tmp/venv
+          docker exec ci /tmp/venv/bin/pip install -q -e ".[test]"
+      - name: Add the test CA to the system CA store
+        # OpenSSL's default CA directory.
+        run: |
+          docker exec -e TEST_CA ci sh -c \
+            'cp "$TEST_CA" "/etc/pki/tls/certs/$(openssl x509 -hash -noout -in "$TEST_CA").0"'
+          docker exec ci openssl verify "$TEST_CA"
+      - name: Run tests
+        run: docker exec -e GET_TRUST_ANCHOR_TEST_CA_IN_SYSTEM_STORE=1 ci /tmp/venv/bin/pytest
+
+  test-libressl:
+    name: test (Alpine, LibreSSL)
+    runs-on: ubuntu-latest
+    env:
+      TEST_CA: tests/fixtures/system-ca/test-ca.pem
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start alpine:3.24
+        run: docker run -d --name ci -v "$PWD:/src" -w /src alpine:3.24 sleep infinity
+      - name: Install dependencies
+        run: |
+          docker exec ci apk add -q libressl python3
+          # Alpine installs LibreSSL's command line tool as "libressl".
+          docker exec ci ln -sf /usr/bin/libressl /usr/local/bin/openssl
+          docker exec ci openssl version
+          docker exec ci python3 -m venv /tmp/venv
+          docker exec ci /tmp/venv/bin/pip install -q -e ".[test]"
+      - name: Add the test CA to the system CA store
+        # LibreSSL's default CA directory.
+        run: |
+          docker exec -e TEST_CA ci sh -c 'mkdir -p /etc/ssl/certs &&
+            cp "$TEST_CA" "/etc/ssl/certs/$(openssl x509 -hash -noout -in "$TEST_CA").0"'
+          docker exec ci openssl verify "$TEST_CA"
+      - name: Run tests
+        # Only the system CA store tests: LibreSSL's smime has no -attime, which the
+        # date-pinned validation tests need.
+        run: >-
+          docker exec -e GET_TRUST_ANCHOR_TEST_CA_IN_SYSTEM_STORE=1 ci /tmp/venv/bin/pytest
+          tests/test_trust_anchor.py::TestSystemCaStore
